@@ -1,1 +1,1 @@
-# Grupo1-Redes-de-Computadores
+# Grupo1 - [CIN0018] Fundamentos de Redes de Computadores
