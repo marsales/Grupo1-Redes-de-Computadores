@@ -1,33 +1,49 @@
 from socket import *
 from pathlib import Path
 
-bufferSize = 1024
-serverPort = 12000
-serverSocket = socket(AF_INET, SOCK_DGRAM)
-serverSocket.bind(('', serverPort))
-
-print('The server is ready to receive')
+# ================================== Configuração Inicial ==================================
 
 
-while True:
-    nome, clientAddrress = serverSocket.recvfrom(bufferSize)
-    nomeAlterado = 'leilao_' + nome.decode()
-    caminho = Path(nomeAlterado)
+bufferSize = 1024   # tamanho de um pacote
+serverPort = 12000  # definição da porta utilizada
+serverSocket = socket(AF_INET, SOCK_DGRAM)  # socket do servidor, definido IPv4 e UDP
+serverSocket.bind(('', serverPort))  # faz o registro de como contatar o servidor (qualquer formato + porta)
 
-    with open(caminho, 'wb') as arquivoAlterado:
-        message, clientAddress = serverSocket.recvfrom(bufferSize)
+print('The server is ready to receive')  # servidor está pronto -> podemos começar a receber pacotes
+
+
+
+# ============================= Recebendo Arquivo do Cliente ==============================
+
+
+while True:  # while true pois o servidor nunca deve fechar após atender um cliente
+    nome, clientAddrress = serverSocket.recvfrom(bufferSize)  # recebe do cliente o pacote contendo o nome do arquivo que será enviado e guarda o endereço do cliente para respondê-lo
+    nomeAlterado = 'leilao_' + nome.decode()  # pegamos a string do nome enviado pelo cliente e adicionamos leilão na frente
+    caminho = Path(nomeAlterado)  # definimos o caminho para o novo arquivo (leilão + nome)
+
+    with open(caminho, 'wb') as arquivoAlterado:  # cria/abre o novo arquivo para escrita binária
+        message, clientAddress = serverSocket.recvfrom(bufferSize)  # recebe o primeiro pacote do arquivo
         while (message != b'EOF'):
-            if (message != b'EOF'):
-                arquivoAlterado.write(message)
-            message, clientAddress = serverSocket.recvfrom(bufferSize)
+            if (message != b'EOF'):  # verificação para não escrever o EOF no novo arquivo
+                arquivoAlterado.write(message) # escreve o pacote no novo arquivo
+
+            message, clientAddress = serverSocket.recvfrom(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
             
+        # enviamos ao cliente o nome do novo arquivo
+        # fizemos isso dentro desse bloco dado que era aqui onde estavam armazenadas as informações necessárias
         message = (nomeAlterado).encode()
         serverSocket.sendto(message, clientAddress)
         
-    with open(caminho, 'rb') as arquivoAlterado:
-        message = arquivoAlterado.read(bufferSize)
+
+
+# ============================== Enviando Arquivo ao Cliente ==============================
+
+
+    with open(caminho, 'rb') as arquivoAlterado:   # o servidor abre para leitura binária o novo arquivo que ele recém salvou
+        message = arquivoAlterado.read(bufferSize)  # leitura do primeiro pacote do novo arquivo
         while message:
-            serverSocket.sendto(message, clientAddress)
-            message = arquivoAlterado.read(bufferSize)
-        serverSocket.sendto(b'EOF', clientAddress)
+            serverSocket.sendto(message, clientAddress)  # envia o pacote ao cliente
+            message = arquivoAlterado.read(bufferSize)  # leitura do próximo pacote para continuar a iterar o loop
+
+        serverSocket.sendto(b'EOF', clientAddress)   # como o UDP não fecha a conexão automaticamente, enviamos o EOF para indicar que devemos finalziar
 
