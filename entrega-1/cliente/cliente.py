@@ -53,3 +53,6 @@ with open(caminho, 'wb') as arquivoAlterado:  # abre/cria o arquivo com o nome m
 
         message, serverAddress = clientSocket.recvfrom(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
 
+# =============================== Finalizando Conexão com o Servidor ===============================
+
+clientSocket.close()  # fechamos o socket do cliente, finalizando a conexão com o servidor
