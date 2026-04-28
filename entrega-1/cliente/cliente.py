@@ -16,7 +16,7 @@ clientSocket = socket(AF_INET, SOCK_DGRAM)           # socket do cliente, defini
 # ============================== Enviando Arquivo ao Servidor ==============================
 
 
-nome = 'assubiu.ogg'  # nome do arquivo que queremos abrir
+nome = 'texto.txt'  # nome do arquivo que queremos abrir
 arquivo = Path(nome)  # caminho para o arquivo que queremos abrir
 a = 1                 # variável contadora que indica o número do pacote
 
@@ -33,7 +33,7 @@ with open(arquivo, 'rb') as f:  # abrimos o arquivo e lemos o conteúdo em forma
         clientSocket.sendto(message, (serverName, serverPort))  # envia o pacote lido ao servidor
         message = f.read(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
     
-    clientSocket.sendto(b'EOF', (serverName, serverPort)) # como o UDP não fecha a conexão automaticamente, enviamos o EOF para indicar que devemos finalziar
+clientSocket.sendto(b'EOF', (serverName, serverPort)) # como o UDP não fecha a conexão automaticamente, enviamos o EOF para indicar que devemos finalziar
 
 
 
@@ -53,6 +53,6 @@ with open(caminho, 'wb') as arquivoAlterado:  # abre/cria o arquivo com o nome m
 
         message, serverAddress = clientSocket.recvfrom(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
 
-# =============================== Finalizando Conexão com o Servidor ===============================
+# ============================= Fechando o Socket do Cliente ==============================
 
-clientSocket.close()  # fechamos o socket do cliente, finalizando a conexão com o servidor
+clientSocket.close()  # fechamos o socket do cliente
