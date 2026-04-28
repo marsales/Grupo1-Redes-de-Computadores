@@ -22,18 +22,20 @@ a = 1                 # variável contadora que indica o número do pacote
 
 
 with open(arquivo, 'rb') as f:  # abrimos o arquivo e lemos o conteúdo em formato de bytes (leitura binária)
+    print(f'[Cliente]: Enviando arquivo "{nome}" para o servidor {serverName}:{serverPort}.')
     message = (str(arquivo)).encode()  # nome do arquivo em bytes, para que possamos enviá-lo
     clientSocket.sendto(message, (serverName, serverPort))  # pacote que contém o nome do arquivo --UDP-> servidor
 
     message = f.read(bufferSize)  # leitura do primeiro pacote armazenado no arquivo
     while (message):
-        print(a)  # enquanto estivermos lendo o conteúdo do arquivo, printamos o número do pacote
+        print(f'[Cliente]: Enviando pacote {a} para o servidor.') 
         a+=1
         #print(message)
         clientSocket.sendto(message, (serverName, serverPort))  # envia o pacote lido ao servidor
         message = f.read(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
     
 clientSocket.sendto(b'EOF', (serverName, serverPort)) # como o UDP não fecha a conexão automaticamente, enviamos o EOF para indicar que devemos finalziar
+print(f'[Cliente]: Arquivo "{nome}" enviado para o servidor {serverName}:{serverPort}.')
 
 
 
@@ -44,6 +46,7 @@ clientSocket.sendto(b'EOF', (serverName, serverPort)) # como o UDP não fecha a 
 nome, serverAddress = clientSocket.recvfrom(bufferSize)  # guardará: nome <- novo nome | serverAdress <- IP + porta do servidor
 nomeAlterado = nome.decode()  # converte o novo nome de byte para string
 caminho = Path(nomeAlterado)  # caminho para o novo arquivo com nome modificado
+print(f'[Cliente]: Recebendo arquivo "{nomeAlterado}" do servidor {serverAddress}.')
 
 message, serverAddress = clientSocket.recvfrom(bufferSize)  # aguarda receber o primeiro pacote do servidor
 with open(caminho, 'wb') as arquivoAlterado:  # abre/cria o arquivo com o nome modificado para escrita em binário
@@ -53,6 +56,9 @@ with open(caminho, 'wb') as arquivoAlterado:  # abre/cria o arquivo com o nome m
 
         message, serverAddress = clientSocket.recvfrom(bufferSize)  # leitura do próximo pacote para a nova iteração do loop
 
+print(f'[Cliente]: Arquivo "{nomeAlterado}" recebido do servidor {serverAddress}.')
+
 # ============================= Fechando o Socket do Cliente ==============================
 
+print(f'[Cliente]: Fechando o socket do cliente.')
 clientSocket.close()  # fechamos o socket do cliente
