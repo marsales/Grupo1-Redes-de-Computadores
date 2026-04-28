@@ -17,7 +17,7 @@ Espera-se do programa:
 6. Servidor irá receber o nome do arquivo, criar localmente um arquivo com o prefixo "leilao_" e o nome do arquivo recebido e escrever os dados recebidos em ordem;
 7. Servidor, ao detectar EOF, irá fechar o arquivo e reenviar a nova versão com o título alterado na seguinte ordem: irá enviar o nome do arquivo e o arquivo em si em pacotes, finalizando a transmissão com um especificador de final de arquivo EOF;
 8. Cliente irá receber o nome do arquivo criar localmente um arquivo com nome do arquivo recebido e escrever os dados recebidos em ordem;
-9. Cliente irá fechar o socket, para executar novamente é necessrário reiniciar o programa do Cliente.
+9. Cliente irá fechar o socket, para executar novamente é necessário reiniciar o programa do Cliente.
 
 Pode-se executar o programa através do comando:
 ```make run```, se a ferramenta make estiver disponível na máquina.
