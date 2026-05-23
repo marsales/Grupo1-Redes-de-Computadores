@@ -1,11 +1,53 @@
 from socket import *
 from pathlib import Path
-import time
 
 # ======================================= Definições =======================================
 
-WfC0fA = 1, WfA0 = 2, WfC1fA = 3, WfA1 = 4      # estados possíveis do transmissor rdt3.0
-Wf0fB = 5, Wf1fB = 6                            # estados possíveis do receptor rdt3.0
+WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
+Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor rdt3.0
+
+# =================================== Funções do rdt3.0 ===================================
+
+def rdtsend(message, clientSocket, serverName, serverPort, bufferSize, a, txCurrState, lastPckg):
+    pckg = lastPckg
+    txNextState = txCurrState
+    ready = False
+    match txCurrState:
+        case 1: #WfC0fA
+            print(f'[Cliente]: Enviando pacote {a} de SeqNum {0} para o servidor {serverName}:{serverPort}.')
+            pckg = "0".encode() + message.encode()  # pacote que contém o nome do arquivo --UDP-> servidor
+            clientSocket.sendto(pckg, (serverName, serverPort))
+            a += 1
+            txNextState = WfA0
+        case 2: #WfA0
+            try:
+                ack, serverAddress = clientSocket.recvfrom(bufferSize)  # aguardamos o ACK do servidor
+                if ack.decode() == "ACK0":
+                    print(f'[Cliente]: ACK0 recebido do servidor {serverAddress}.')
+                    ready = True
+                    txNextState = WfC1fA
+            except timeout:
+                print(f'[Cliente]: Timeout esperando ACK0. Reenviando nome do arquivo "{nome}".')
+                clientSocket.sendto(pckg, (serverName, serverPort))
+        case 3: #WfC1fA
+            print(f'[Cliente]: Enviando pacote {a} de SeqNum {1} para o servidor {serverName}:{serverPort}.')
+            pckg = "1".encode() + message.encode()  # pacote que contém o nome do arquivo --UDP-> servidor
+            clientSocket.sendto(pckg, (serverName, serverPort))
+            a += 1
+            txNextState = WfA1
+        case 4: #WfA1
+            try:
+                ack, serverAddress = clientSocket.recvfrom(bufferSize)  # aguardamos o ACK do servidor
+                if ack.decode() == "ACK1":
+                    print(f'[Cliente]: ACK1 recebido do servidor {serverAddress}.')
+                    ready = True
+                    txNextState = WfC0fA
+            except timeout:
+                print(f'[Cliente]: Timeout esperando ACK1. Reenviando nome do arquivo "{nome}".')
+                clientSocket.sendto(pckg, (serverName, serverPort))
+    return txNextState, pckg, ready, a
+
+# def rdtrecv(clientSocket, bufferSize, rxCurrState):
 
 # ================================== Configuração Inicial ==================================
 
@@ -24,14 +66,14 @@ rxCurrState = WfA0
 
 # ============================== Enviando Arquivo ao Servidor ==============================
 
-
 nome = 'texto.txt'                              # nome do arquivo que queremos abrir
 nomePath = Path(nome)                           # caminho para o arquivo que queremos abrir
-message = f"FileName: {str(nome)}"              # nome do arquivo em bytes, para que possamos enviá-lo
+message = f"FileName: {str(nome)}\n"            # nome do arquivo em bytes, para que possamos enviá-lo
 message = message[:messageSize]                 # garantimos que o nome do arquivo caiba em um pacote (bufferSize - headerSize)
-pckg = "0".encode() + message.encode()          # pacote que contém o nome do arquivo --UDP-> servidor
+lastPckg = None                                 # variável que armazena o último pacote enviado, para que possamos reenviá-lo em caso de timeout
 a = 1                                           # variável contadora que indica o número do pacote
 hasMessageToSend = True                         # variável booleana que indica se ainda temos mensagens para enviar
+ready = True                                    # variável booleana que indica se o cliente está pronto para enviar o próximo pacote (após receber o ACK do servidor)
 
 try:
     arquivo = open(nomePath, 'rb')              # abrimos o arquivo e lemos o conteúdo em formato de bytes (leitura binária)
@@ -39,52 +81,6 @@ except FileNotFoundError:
     print(f'[Cliente]: Arquivo "{nome}" não encontrado. Encerrando o cliente.')
     hasMessageToSend = False
 
-# tx_state_machine:
-match txCurrState:
-    case 1: # WfC0fA
-        if hasMessageToSend:
-            print(f'[Cliente]: Enviando pacote {a} de SeqNum {0} para o servidor {serverName}:{serverPort}.')
-            pckg = "0".encode() + message.encode()  # pacote que contém o nome do arquivo --UDP-> servidor
-            clientSocket.sendto(pckg, (serverName, serverPort))
-            a += 1
-            txCurrState = WfA0
-    case 2: # WfA0
-        try:
-            ack, serverAddress = clientSocket.recvfrom(bufferSize)  # aguardamos o ACK do servidor
-            if ack.decode() == "ACK0":
-                print(f'[Cliente]: ACK0 recebido do servidor {serverAddress}.')
-                if(message := arquivo.read(messageSize)):  # leitura do próximo pacote armazenado no arquivo
-                    # TODO: implementar a leitura e envio dos próximos pacotes do arquivo, seguindo a lógica do rdt3.0
-                    print("TODO")
-                else:
-                    # TODO: implementar o envio do EOF para o servidor, indicando que não temos mais pacotes para enviar
-                    print("TODO")
-                txCurrState = WfC1fA
-        except timeout:
-            print(f'[Cliente]: Timeout esperando ACK0. Reenviando nome do arquivo "{nome}".')
-            clientSocket.sendto(pckg, (serverName, serverPort))
-    case 3: # WfC1fA
-        if hasMessageToSend:
-            print(f'[Cliente]: Enviando pacote {a} de SeqNum {1} para o servidor {serverName}:{serverPort}.')
-            pckg = "1".encode() + message.encode()  # pacote que contém o nome do arquivo --UDP-> servidor
-            clientSocket.sendto(pckg, (serverName, serverPort))
-            a += 1
-            txCurrState = WfA1
-    case 4: # WfA1
-        try:
-            ack, serverAddress = clientSocket.recvfrom(bufferSize)  # aguardamos o ACK do servidor
-            if ack.decode() == "ACK1":
-                print(f'[Cliente]: ACK1 recebido do servidor {serverAddress}.')
-                if(message := arquivo.read(messageSize)):  # leitura do próximo pacote armazenado no arquivo
-                    # TODO: implementar a leitura e envio dos próximos pacotes do arquivo, seguindo a lógica do rdt3.0
-                    print("TODO")
-                else:
-                    # TODO: implementar o envio do EOF para o servidor, indicando que não temos mais pacotes para enviar
-                    print("TODO")
-                txCurrState = WfC0fA
-        except timeout:
-            print(f'[Cliente]: Timeout esperando ACK1. Reenviando nome do arquivo "{nome}".')
-            clientSocket.sendto(pckg, (serverName, serverPort))
-
-# rx_state_machine:
-
+while hasMessageToSend:
+    if hasMessageToSend:
+        txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverName, serverPort, bufferSize, a, txCurrState, lastPckg)
