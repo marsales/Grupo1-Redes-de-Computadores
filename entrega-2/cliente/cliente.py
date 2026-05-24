@@ -60,7 +60,7 @@ def rdtsend(message, socket, endName, endPort, bufferSize, a, txCurrState, lastP
                     socket.sendto(pckg, (endName, endPort))
     return txNextState, pckg, ready, a
 
-def receive(socket, bufferSize, rxCurrState, userName = "Local", headerSize = 1):
+def receive(socket, bufferSize, rxCurrState, b, userName = "Local", headerSize = 1):
     prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     
     message = None                  # variavel que armazena o conteudo do pacote recebido, caso ele seja válido
@@ -74,7 +74,8 @@ def receive(socket, bufferSize, rxCurrState, userName = "Local", headerSize = 1)
                 seqNum = pckg[:headerSize].decode()                 # extraímos o SeqNum do pacote do header
                 content = pckg[headerSize:]                         # extraímos o conteúdo do pacote
                 if seqNum == "0":
-                    print(f'[{userName}]: Pacote {seqNum} recebido do destino {endAddress}. Enviando ACK0.')
+                    print(f'[{userName}]: Pacote {b} de SeqNum {seqNum} recebido do destino {endAddress}. Enviando ACK0.')
+                    b+=1
                     if(random.random() < prob):
                         socket.sendto("ACK0".encode(), endAddress)      # enviamos o ACK0
                     message = content
@@ -82,7 +83,7 @@ def receive(socket, bufferSize, rxCurrState, userName = "Local", headerSize = 1)
                     valid = True
                     rxNextState = Wf1fB
                 else:
-                    print(f'[{userName}]: Pacote {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 0. Ignorando pacote e reenviando ACK1.')
+                    print(f'[{userName}]: Pacote {b} de SeqNum {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 0. Ignorando pacote e reenviando ACK1.')
                     if(random.random() < prob):
                         socket.sendto("ACK1".encode(), endAddress)      # reenviamos o ACK1, pois o pacote recebido é duplicado
             except timeout:
@@ -93,7 +94,8 @@ def receive(socket, bufferSize, rxCurrState, userName = "Local", headerSize = 1)
                 seqNum = pckg[:headerSize].decode()                 # extraímos o SeqNum do pacote do header
                 content = pckg[headerSize:]                         # extraímos o conteúdo do pacote
                 if seqNum == "1":
-                    print(f'[{userName}]: Pacote {seqNum} recebido do destino {endAddress}. Enviando ACK1.')
+                    print(f'[{userName}]: Pacote {b} de SeqNum {seqNum} recebido do destino {endAddress}. Enviando ACK1.')
+                    b+=1
                     if(random.random() < prob):
                         socket.sendto("ACK1".encode(), endAddress)      # enviamos o ACK1
                     message = content
@@ -101,12 +103,12 @@ def receive(socket, bufferSize, rxCurrState, userName = "Local", headerSize = 1)
                     valid = True
                     rxNextState = Wf0fB
                 else:
-                    print(f'[{userName}]: Pacote {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 1. Ignorando pacote e reenviando ACK0.')
+                    print(f'[{userName}]: Pacote {b} de SeqNum {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 1. Ignorando pacote e reenviando ACK0.')
                     if(random.random() < prob):
                         socket.sendto("ACK0".encode(), endAddress)      # reenviamos o ACK0, pois o pacote recebido é duplicado
             except timeout:
                 pass
-    return valid, message, endAddress, rxNextState
+    return valid, message, endAddress, rxNextState, b
 
 # ================================== Configuração Inicial ==================================
 
@@ -125,7 +127,7 @@ txCurrState = WfC0fA
 rxCurrState = Wf0fB
 
 
-# ============================== Enviando Arquivo ao Servidor ==============================
+# ================================= Enviando Arquivo ao Servidor =================================
 
 
 lastPckg = None                                 # variável que armazena o último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -134,7 +136,7 @@ hasMessageToSend = True                         # variável booleana que indica 
 ready = True                                    # variável booleana que indica se o cliente está pronto para enviar o próximo pacote (após receber o ACK do servidor)
 userName = "Cliente"                            # nome do cliente, para fins de debug
 
-nome = 'texto.txt'  # nome do arquivo que queremos abrir
+nome = 'assubiu.ogg'  # nome do arquivo que queremos abrir
 arquivo = Path(nome)  # caminho para o arquivo que queremos abrir
 message = f"NAME_OF_FILE: {nome}".encode()  
 
@@ -147,3 +149,35 @@ with open(arquivo, 'rb') as f:  # abrimos o arquivo e lemos o conteúdo em forma
     txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverName, serverPort, bufferSize, a, txCurrState, lastPckg, userName)
     while ready == False:
         txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverName, serverPort, bufferSize, a, txCurrState, lastPckg, userName)
+
+
+# ================================= Recebendo Arquivo do Servidor =================================
+
+b = 1
+
+clientSocket.settimeout(360)
+while True:
+    valid, message, endAddress, rxCurrState, b = receive(clientSocket, bufferSize, rxCurrState, b, userName)
+    while not valid:
+        valid, message, endAddress, rxCurrState, b = receive(clientSocket, bufferSize, rxCurrState, b, userName)
+    if message.decode().startswith("NAME_OF_FILE: "):
+        message = message.decode()
+        nome = message[14:]
+        caminho = Path(nome)
+    else:
+        print(f'[{userName}]: Pacote recebido do destino {endAddress}, mas conteúdo do pacote não é o nome do arquivo. DEU MUITO ERRADO!')
+        exit(1)
+    with open(caminho, 'wb') as arquivo_alterado:
+        while True:
+            valid, message, endAddress, rxCurrState, b = receive(clientSocket, bufferSize, rxCurrState, b, userName)
+            while not valid:
+                valid, message, endAddress, rxCurrState, b = receive(clientSocket, bufferSize, rxCurrState, b, userName)
+            if message == b'EOF':
+                print(f'[{userName}]: Pacote EOF recebido do destino {endAddress}. Arquivo "{nome}" recebido e finalizado!')
+                break
+            else:
+                arquivo_alterado.write(message)
+                print(f'[{userName}]: Pacote de conteúdo recebido do destino {endAddress}. Escrevendo conteúdo no arquivo "{nome}".')
+    break
+
+clientSocket.close()
