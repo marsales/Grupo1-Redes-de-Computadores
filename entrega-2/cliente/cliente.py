@@ -17,6 +17,9 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     # Obs.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     prob = 0.9          # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    timeoutSeconds = 1  # timeout de 1 segundo para o cliente esperar por um ACK do servidor
+    WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
+
     pckg = lastPckg     # variável que armazena o último pacote enviado, para que possamos reenviá-lo em caso de timeout
     ready = False       # variável booleana que indica se o cliente está pronto para enviar o próximo pacote (após receber o ACK do servidor)
     txNextState = txCurrState
@@ -29,6 +32,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
             count += 1
             txNextState = WfA0
         case 2: #WfA0
+            socket.settimeout(timeoutSeconds)  # definimos o timeout para esperar o ACK do servidor
             try:
                 ack, endAddress = socket.recvfrom(bufferSize)  # aguardamos o ACK do destino
                 if endAddress == endAddressDst and ack.decode() == "ACK0":
@@ -47,6 +51,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
             count += 1
             txNextState = WfA1   
         case 4: #WfA1
+            socket.settimeout(timeoutSeconds)  # definimos o timeout para esperar o ACK do destino
             try:
                 ack, endAddress = socket.recvfrom(bufferSize)  # aguardamos o ACK do destino
                 if endAddress == endAddressDst and ack.decode() == "ACK1":
@@ -61,12 +66,15 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
 
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
     prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    Wf0fB, Wf1fB = 5, 6             # estados possíveis do receptor rdt3.0
+
     message = None                  # variavel que armazena o conteudo do pacote recebido, caso ele seja válido
     endAddress = None               # variavel que armazena o endereço do remetente do pacote recebido, caso ele seja válido
     valid = False                   # variavel booleana que indica se o pacote recebido é válido (ou seja, tem o SeqNum esperado e chegou algo)
     rxNextState = rxCurrState 
     match rxCurrState:
         case 5: #Wf0fB
+            socket.settimeout(None)                                 # definimos o timeout para esperar o pacote do destino
             try:
                 pckg, endAddress = socket.recvfrom(bufferSize)      # aguardamos o pacote do destino
                 seqNum = pckg[:headerSize].decode()                 # extraímos o SeqNum do pacote do header
@@ -87,6 +95,7 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
             except timeout:
                 pass
         case 6: #Wf1fB
+            socket.settimeout(None)                                 # definimos o timeout para esperar o pacote do destino
             try:
                 pckg, endAddress = socket.recvfrom(bufferSize)      # aguardamos o pacote do destino
                 seqNum = pckg[:headerSize].decode()                 # extraímos o SeqNum do pacote do header
@@ -117,13 +126,11 @@ serverAddress = (gethostbyname(serverName), serverPort)     # tupla que represen
 bufferSize = 1024                                           # tamanho de um pacote
 headerSize = 1                                              # tamanho do header do pacote (número do pacote)
 messageSize = bufferSize - headerSize                       # tamanho do conteúdo do pacote
-timeoutSeconds = 1                                          # timeout de 1 segundo para o cliente esperar por um ACK do servidor
 userName = "Cliente"                                        # nome do cliente, para fins de debug
 a = 1                                                       # variável de controle de envio (debug)
 b = 1                                                       # variável de controle de recebimento (debug)
 
 clientSocket = socket(AF_INET, SOCK_DGRAM)                  # socket do cliente, definido IPv4 e UDP
-clientSocket.settimeout(timeoutSeconds)                     # definimos o timeout para o socket do cliente
 
 txCurrState = WfC0fA
 rxCurrState = Wf0fB
