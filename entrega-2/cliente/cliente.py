@@ -4,20 +4,20 @@ import random
 
 # ======================================= Definições =======================================
 
+
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor rdt3.0
 
+
 # =================================== Funções do rdt3.0 ===================================
 
-# ATENÇÃO: Em WfA0 e WfA1, mesmo que o ack recebido seja o não esperado, recvfrom reseta o timeout, ou seja, quebra o paradigma do Kurose. Ver com os monitores
-# se isso é um problema ou se é algo que pode ser ignorado, se for um problema, podemos utilizar a biblioteca time e fazer o controle do timeout manualmente
 
 def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, lastPckg, userName = "Local"):
     # Obs.: a variável 'count' é apenas para fins de debug, para indicar o número do pacote que estamos enviando
     # Obs.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
-    prob = 0.9          # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
-    timeoutSeconds = 1  # timeout de 1 segundo para o cliente esperar por um ACK do servidor
+    prob = 0.9                                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    timeoutSeconds = 1                              # timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
 
     pckg = lastPckg     # variável que armazena o último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -65,7 +65,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     return txNextState, pckg, ready, count
 
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
-    prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # estados possíveis do receptor rdt3.0
 
     message = None                  # variavel que armazena o conteudo do pacote recebido, caso ele seja válido
@@ -117,6 +117,7 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
                 pass
     return valid, message, endAddress, rxNextState, count
 
+
 # ================================== Configuração Inicial ==================================
 
 
@@ -124,7 +125,7 @@ serverName = 'localhost'                                    # localhost -> clien
 serverPort = 12000                                          # definição da porta utilizada
 serverAddress = (gethostbyname(serverName), serverPort)     # tupla que representa o endereço do servidor
 bufferSize = 1024                                           # tamanho de um pacote
-headerSize = 1                                              # tamanho do header do pacote (número do pacote)
+headerSize = 1                                              # tamanho do header do pacote (número de sequencia), que é 1 byte
 messageSize = bufferSize - headerSize                       # tamanho do conteúdo do pacote
 userName = "Cliente"                                        # nome do cliente, para fins de debug
 a = 1                                                       # variável de controle de envio (debug)
@@ -143,11 +144,15 @@ lastPckg = None                                 # variável que armazena o últi
 hasMessageToSend = True                         # variável booleana que indica se ainda temos mensagens para enviar
 ready = True                                    # variável booleana que indica se o cliente está pronto para enviar o próximo pacote (após receber o ACK do servidor)
 
-nome = 'texto.txt'   # nome do arquivo que queremos abrir
-arquivo = Path(nome)    # caminho para o arquivo que queremos abrir
+nome = 'canario.webp'                   # nome do arquivo que queremos abrir
+arquivo = Path(__file__).parent / nome  # caminho para o arquivo que queremos abrir
+if not arquivo.is_file():
+    print(f'[{userName}]: O arquivo "{nome}" não existe. Verifique se o nome do arquivo e o caminho estão corretos.')
+    exit(1)
 message = f"NAME_OF_FILE: {nome}".encode()  
 
 with open(arquivo, 'rb') as f:  # abrimos o arquivo e lemos o conteúdo em formato de bytes (leitura binária)
+    print(f'[{userName}]: Preparando para enviar o arquivo "{nome}" para o destino {serverAddress}.')
     while message:
         txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverAddress, bufferSize, a, txCurrState, lastPckg, userName)
         if ready:
@@ -156,12 +161,12 @@ with open(arquivo, 'rb') as f:  # abrimos o arquivo e lemos o conteúdo em forma
     txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverAddress, bufferSize, a, txCurrState, lastPckg, userName)
     while ready == False:
         txCurrState, lastPckg, ready, a = rdtsend(message, clientSocket, serverAddress, bufferSize, a, txCurrState, lastPckg, userName)
+    print(f'[{userName}]: Arquivo "{nome}" enviado para o destino {serverAddress} e finalizado!')
 
 
 # ================================= Recebendo Arquivo do Servidor =================================
 
 
-clientSocket.settimeout(360)
 while True:
     valid, message, endAddress, rxCurrState, b = receive(clientSocket, bufferSize, rxCurrState, b, userName)
     while not valid:
@@ -169,7 +174,8 @@ while True:
     if message.decode().startswith("NAME_OF_FILE: "):
         message = message.decode()
         nome = message[14:]
-        caminho = Path(nome)
+        caminho = Path(__file__).parent / nome
+        print(f'[{userName}]: Pacote recebido do destino {endAddress} com nome do arquivo "{nome}". Preparando para receber o conteúdo do arquivo e escrevê-lo no arquivo "{nome}".')
     else:
         print(f'[{userName}]: Pacote recebido do destino {endAddress}, mas conteúdo do pacote não é o nome do arquivo. DEU MUITO ERRADO!')
         exit(1)

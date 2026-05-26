@@ -1,22 +1,23 @@
 from socket import *
 from pathlib import Path
 import random
+
 # ======================================= Definições =======================================
+
 
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor rdt3.0
 
+
 # =================================== Funções do rdt3.0 ===================================
 
-# ATENÇÃO: Em WfA0 e WfA1, mesmo que o ack recebido seja o não esperado, recvfrom reseta o timeout, ou seja, quebra o paradigma do Kurose. Ver com os monitores
-# se isso é um problema ou se é algo que pode ser ignorado, se for um problema, podemos utilizar a biblioteca time e fazer o controle do timeout manualmente
 
 def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, lastPckg, userName = "Local"):
     # Obs.: a variável 'count' é apenas para fins de debug, para indicar o número do pacote que estamos enviando
     # Obs.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
-    prob = 0.9          # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
-    timeoutSeconds = 1  # timeout de 1 segundo para o cliente esperar por um ACK do servidor
+    prob = 0.9                                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    timeoutSeconds = 1                              # timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor rdt3.0
 
     pckg = lastPckg     # variável que armazena o último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -64,7 +65,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     return txNextState, pckg, ready, count
 
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
-    prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 0.9                      # probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # estados possíveis do receptor rdt3.0
 
     message = None                  # variavel que armazena o conteudo do pacote recebido, caso ele seja válido
@@ -84,6 +85,7 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
                     if(random.random() < prob):
                         socket.sendto("ACK0".encode(), endAddress)  # enviamos o ACK0
                     message = content
+                    endAddress = endAddress
                     valid = True
                     rxNextState = Wf1fB
                 else:
@@ -104,6 +106,7 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
                     if(random.random() < prob):
                         socket.sendto("ACK1".encode(), endAddress)  # enviamos o ACK1
                     message = content
+                    endAddress = endAddress
                     valid = True
                     rxNextState = Wf0fB
                 else:
@@ -150,7 +153,7 @@ while True:
         message = message.decode()
         nome = message[14:]
         nome_alterado = 'leilao_' + nome
-        caminho = Path(nome_alterado)
+        caminho = Path(__file__).parent / nome_alterado
     else:
         print(f'[Servidor]: Pacote recebido do destino {endAddress}, mas conteúdo do pacote não é o nome do arquivo. DEU MUITO ERRADO!')
         exit(1)
@@ -165,7 +168,6 @@ while True:
             else:
                 arquivo_alterado.write(message)
                 print(f'[{userName}]: Pacote de conteúdo recebido do destino {endAddress}. Escrevendo conteúdo no arquivo "{nome_alterado}".')
-
 
 
 # ================================= Enviando Arquivo ao Cliente =================================    
