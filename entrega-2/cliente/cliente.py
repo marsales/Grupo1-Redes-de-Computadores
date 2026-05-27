@@ -4,7 +4,6 @@ import random
 
 # ======================================= Definições =======================================
 
-
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor RDT 3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor RDT 3.0
 
@@ -21,7 +20,6 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     prob = 0.9                                 # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
-
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
     ready = False                              # Se o cliente está pronto para enviar o próximo pacote (após receber o ACK do servidor)
     txNextState = txCurrState                  # A priori, o estado se mantém o mesmo
@@ -77,7 +75,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
             pckg = "1".encode() + message  # pacote que contém o nome do arquivo --UDP-> destino
             
             # Simulação de não-confiabilidade
-            if(random.random() < prob):
+            if (random.random() < prob):
                 socket.sendto(pckg, endAddressDst)
             count += 1
 
@@ -119,7 +117,6 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
     prob = 0.9                      # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # Estados possíveis do receptor RDT 3.0
-
     message = None                  # Conteúdo do pacote recebido, caso ele seja válido
     endAddress = None               # Endereço do remetente do pacote recebido, caso ele seja válido
     valid = False                   # Se o pacote recebido é válido (ou seja, tem o SeqNum esperado e chegou algo)
@@ -146,7 +143,7 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
                     print(f'[{userName}]: Pacote {count} de SeqNum {seqNum} recebido do destino {endAddress}. Enviando ACK0.')
                     count += 1
                     if(random.random() < prob):
-                        socket.sendto("ACK0".encode(), endAddress)  # enviamos o ACK0
+                        socket.sendto("ACK0".encode(), endAddress)
                     message = content
                     endAddress = endAddress
                     valid = True
@@ -154,10 +151,10 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
 
                 # Se recebeu pacote 1
                 else:
-                    # Reenviamos ACK 1 e 
+                    # Reenviamos ACK 1
                     print(f'[{userName}]: Pacote {count} de SeqNum {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 0. Ignorando pacote e reenviando ACK1.')
                     if(random.random() < prob):
-                        socket.sendto("ACK1".encode(), endAddress)  # reenviamos o ACK1, pois o pacote recebido é duplicado
+                        socket.sendto("ACK1".encode(), endAddress)
             
             # ...exceto se tiver ocorrido timeout
             except timeout:
@@ -165,27 +162,41 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
 
         # Se está esperando pacote 1
         case 6: #Wf1fB
-            socket.settimeout(None)                                 # definimos o timeout para esperar o pacote do destino
+
+            # Timeout para esperar o pacote do destino
+            socket.settimeout(None)  
+
+            # Tenta receber mensagem do servidor...                               
             try:
-                pckg, endAddress = socket.recvfrom(bufferSize)      # aguardamos o pacote do destino
-                seqNum = pckg[:headerSize].decode()                 # extraímos o SeqNum do pacote do header
-                content = pckg[headerSize:]                         # extraímos o conteúdo do pacote
+                pckg, endAddress = socket.recvfrom(bufferSize)   
+
+                # Extrair o SeqNum e o conteúdo 
+                seqNum = pckg[:headerSize].decode()                 
+                content = pckg[headerSize:]  
+
+                # Se recebeu pacote 1                      
                 if seqNum == "1":
                     print(f'[{userName}]: Pacote {count} de SeqNum {seqNum} recebido do destino {endAddress}. Enviando ACK1.')
                     count += 1
                     if(random.random() < prob):
-                        socket.sendto("ACK1".encode(), endAddress)  # enviamos o ACK1
+                        socket.sendto("ACK1".encode(), endAddress)
                     message = content
                     endAddress = endAddress
                     valid = True
                     rxNextState = Wf0fB
+
+                # Se recebeu pacote 0
                 else:
+                    # Reenviamos ACK 0
                     print(f'[{userName}]: Pacote {count} de SeqNum {seqNum} recebido do destino {endAddress}, mas SeqNum esperado era 1. Ignorando pacote e reenviando ACK0.')
                     if(random.random() < prob):
-                        socket.sendto("ACK0".encode(), endAddress)  # reenviamos o ACK0, pois o pacote recebido é duplicado
+                        socket.sendto("ACK0".encode(), endAddress)
+            
+            # ...exceto se tiver ocorrido timeout
             except timeout:
                 pass
-            
+
+    # Retornar as novas variáveis      
     return valid, message, endAddress, rxNextState, count
 
 
@@ -201,9 +212,7 @@ messageSize = bufferSize - headerSize                       # Tamanho do conteú
 userName = "Cliente"                                        # [DEBUG] Nome do cliente
 a = 1                                                       # [DEBUG] Variável de controle de envio
 b = 1                                                       # [DEBUG] Variável de controle de recebimento
-
 clientSocket = socket(AF_INET, SOCK_DGRAM)                  # Socket do cliente, definido IPv4 e UDP
-
 txCurrState = WfC0fA                                        # Estado atual de transmissão
 rxCurrState = Wf0fB                                         # Estado atual de recepção
 
