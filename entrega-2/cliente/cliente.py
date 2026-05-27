@@ -2,13 +2,16 @@ from socket import *
 from pathlib import Path
 import random
 
+
 # ======================================= Definições =======================================
+
 
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor RDT 3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor RDT 3.0
 
 
 # =================================== Funções do RDT 3.0 ===================================
+
 
 # Envio de pacotes ao servidor
 def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, lastPckg, userName = "Local"):
@@ -112,7 +115,6 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     return txNextState, pckg, ready, count
 
 
-
 # Recebimento de pacotes do servidor
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
     prob = 0.9                      # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
@@ -200,8 +202,8 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
     return valid, message, endAddress, rxNextState, count
 
 
-
 # ================================== Configuração Inicial ==================================
+
 
 serverName = 'localhost'                                    # Cliente e servidor rodam na mesma máquina
 serverPort = 12000                                          # Nº da porta utilizada
@@ -217,8 +219,8 @@ txCurrState = WfC0fA                                        # Estado atual de tr
 rxCurrState = Wf0fB                                         # Estado atual de recepção
 
 
-
 # ================================= Enviando Arquivo ao Servidor =================================
+
 
 lastPckg = None             # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
 hasMessageToSend = True     # Se ainda temos mensagens para enviar
@@ -260,8 +262,8 @@ with open(arquivo, 'rb') as f:
     print(f'[{userName}]: Arquivo "{nome}" enviado para o destino {serverAddress} e finalizado!')
 
 
-
 # ================================= Recebendo Arquivo do Servidor =================================
+
 
 while True:
 

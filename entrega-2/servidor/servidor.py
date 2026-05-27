@@ -2,13 +2,16 @@ from socket import *
 from pathlib import Path
 import random
 
+
 # ======================================= Definições =======================================
+
 
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor RDT 3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor RDT 3.0
 
 
 # =================================== Funções do RDT 3.0 ===================================
+
 
 # Envio de pacotes ao cliente
 def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, lastPckg, userName = "Local"):
@@ -112,7 +115,6 @@ def rdtsend(message, socket, endAddressDst, bufferSize, count, txCurrState, last
     return txNextState, pckg, ready, count
 
 
-
 # Recebimento de pacotes do servidor
 def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSize = 1):
     prob = 0.9                     # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
@@ -199,8 +201,8 @@ def receive(socket, bufferSize, rxCurrState, count, userName = "Local", headerSi
     return valid, message, endAddress, rxNextState, count
 
 
-
 # ================================== Configuração Inicial ==================================
+
 
 bufferSize = 1024                             # Tamanho de um pacote
 headerSize = 1                                # Tamanho do header do pacote, onde fica o SeqNum
@@ -223,6 +225,7 @@ nome_alterado = None                          # 'leilao_' + Nome do arquivo rece
 
 
 # ============================= Recebendo Arquivo do Cliente =============================
+
 
 while True:
 
@@ -268,6 +271,7 @@ while True:
 
 # ================================= Enviando Arquivo ao Cliente =================================    
     
+
     # Garantimos que o endereço do destino esteja no formato (IP, porta)
     endAddress = (gethostbyname(endAddress[0]), endAddress[1])
 
