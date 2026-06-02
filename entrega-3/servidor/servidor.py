@@ -189,6 +189,24 @@ def receive(socket, bufferSize, rxCurrState, headerSize = 1):
     return valid, message, endAddress, rxNextState
 
 
+# ======================== Ouvinte ativo para mensagens do servidor ========================
+
+
+def activeListener(socket, bufferSize, pckgBuffer, acksBuffer, headerSize, callsBufferLock, acksBufferLock):
+    rxCurrState = Wf0fB
+    while True:
+        valid, message, endAddress, rxCurrState = receive(socket, bufferSize, rxCurrState, headerSize)
+        if valid:
+            message = message.decode().strip()
+            if message.startswith("T: ACK"):
+                with acksBufferLock:
+                    if len(acksBuffer) < 256:
+                        acksBuffer.append(message)
+            else:
+                with callsBufferLock:
+                    pckgBuffer.append(message)
+
+
 # ================================== Configuração Inicial ==================================
 
 
@@ -199,6 +217,22 @@ serverPort = 12000                            # Nº da porta utilizada
 serverSocket = socket(AF_INET, SOCK_DGRAM)    # Socket do servidor, definido IPv4 e UDP
 serverSocket.bind(('', serverPort))           # Registro de como contatar o servidor (qualquer formato + porta)
 
+callsBuffer = []                        # Buffer para armazenar mensagens recebidas do servidor que ainda não foram processadas pela aplicação
+acksBuffer = []                         # Buffer para armazenar ACKs recebidos do servidor que ainda não foram processados pela aplicação
+callsBufferLock = threading.Lock()      # Lock para controlar o acesso ao buffer de mensagens recebidas do servidor
+acksBufferLock = threading.Lock()       # Lock para controlar o acesso ao buffer de ACKs recebidos do servidor
+
 userList = {}                                 # Dicionário para armazenar os usuários logados, no formato {username: (ip, port)}
+
+activeListenerThread = threading.Thread(target=activeListener, args=(serverSocket, bufferSize, callsBuffer, acksBuffer, headerSize, callsBufferLock, acksBufferLock))
+activeListenerThread.daemon = True
+activeListenerThread.start()
+
+while True:
+    call = ""
+    if len(callsBuffer) > 0:
+        with callsBufferLock:
+            call = callsBuffer.pop(0)
+            print(f"Mensagem recebida: {call}")
 
 #TODO: ABSOLUTAMENTE TUDO!

@@ -244,7 +244,7 @@ while not logedIn:
         else:
             print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
 
-    messageTx = f"T: LGN; UN: {userName}; SEQ: 0;"
+    messageTx = f"T: LGN; UN: {userName};"
     messageRx = None
     ready = False
     lastPckg = b""
@@ -259,7 +259,7 @@ while not logedIn:
             print(f'[{userName}]: Login bem-sucedido. Bem-vindo ao AuctionCin!')
             logedIn = True
         elif messageRx[0] == "T: LGN_FAIL":
-            if messageRx[1].strip() == "REASON: NAME_TAKEN":
+            if messageRx[1].strip() == "RSN: NAME_TAKEN":
                 print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
             else:
                 print(f'[{userName}]: Login falhou. Motivo desconhecido.')
@@ -268,23 +268,7 @@ while not logedIn:
 activeListenerThread = threading.Thread(target=activeListener, args=(clientSocket, bufferSize, callsBuffer, headerSize, callsBufferLock, acksBufferLock))
 activeListenerThread.daemon = True
 activeListenerThread.start()
-
-#TODO: ABSOLUTAMENTE (quase) TUDO!
-while logedIn:
-    command = input(">> ").strip()
-    commandParts = command.split()
-    match command.split()[0].lower():
-        case "logout":
-            
-        case "bid":
-            
-        case "list":
-            
-        case "status":
-            
-        case _:
-            print("Comando desconhecido. Comandos disponíveis: bid <id_item> <valor>, list, status, logout")    
-
+#...
 activeListenerThread.join()
 
 #DONE: Funções do RDT 3.0 (rdtsend e receive), thread de ouvinte ativo para mensagens do servidor (activeListener), configuração inicial do cliente, comando de login e tratamento de resposta do servidor ao login (incluindo casos de falha)
