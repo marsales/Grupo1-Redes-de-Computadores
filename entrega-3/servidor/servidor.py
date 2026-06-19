@@ -201,10 +201,31 @@ def activeListener(socket, bufferSize, pckgBuffer, acksBuffer, headerSize, calls
             if message.startswith("T: ACK"):
                 with acksBufferLock:
                     if len(acksBuffer) < 256:
-                        acksBuffer.append(message)
+                        acksBuffer.append((message, endAddress))
             else:
                 with callsBufferLock:
-                    pckgBuffer.append(message)
+                    pckgBuffer.append((message, endAddress))
+
+
+# =================================== Funções auxiliares ===================================
+
+
+def splitCall(call):
+    command = call.split(";")[0].strip()
+    args = call.split(";")[1:]
+    match command:
+        case "T: LGN":
+            if len(args) == 2:
+                username = (args[0]).strip()
+                if not username.startswith("UN:"):
+                    return "", [], False
+                username = username.split(":")[1].strip()
+                seqNum = (args[1]).strip()
+                if not seqNum.startswith("SQ:"):
+                    return "", [], False
+                seqNum = seqNum.split(":")[1].strip()
+                return command, [username, seqNum], True
+    return "", [], False
 
 
 # ================================== Configuração Inicial ==================================
@@ -227,12 +248,27 @@ userList = {}                                 # Dicionário para armazenar os us
 activeListenerThread = threading.Thread(target=activeListener, args=(serverSocket, bufferSize, callsBuffer, acksBuffer, headerSize, callsBufferLock, acksBufferLock))
 activeListenerThread.daemon = True
 activeListenerThread.start()
+print(userList)
 
 while True:
     call = ""
+    command = ""
+    endAddress = None
+    validCall = False
+    args = []
     if len(callsBuffer) > 0:
         with callsBufferLock:
-            call = callsBuffer.pop(0)
+            call, endAddress = callsBuffer.pop(0)
             print(f"Mensagem recebida: {call}")
+            command, args, validCall = splitCall(call)
+    if validCall:
+        match command:
+            case "T: LGN":
+                username, seqNum = args
+                if username in userList:
+                    print(f"Usuário {username} já está logado.")
+                else:
+                    userList[username] = [endAddress, int(seqNum)]
+                    print(f"Usuário {username} logado com sucesso. Endereço: {endAddress}")
 
 #TODO: ABSOLUTAMENTE TUDO!

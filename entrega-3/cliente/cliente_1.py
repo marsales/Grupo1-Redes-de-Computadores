@@ -192,25 +192,57 @@ def receive(socket, bufferSize, rxCurrState, headerSize = 1):
 # ======================== Ouvinte ativo para mensagens do servidor ========================
 
 
-def activeListener(socket, bufferSize, pckgBuffer, acksBuffer, headerSize, callsBufferLock, acksBufferLock):
-    rxCurrState = Wf0fB
+def activeAlertListener(alertSocket, bufferSize, headerSize):
+    alertRxCurrState = Wf0fB
     while True:
-        valid, message, endAddress, rxCurrState = receive(socket, bufferSize, rxCurrState, headerSize)
-        if valid:
-            message = message.decode().strip()
-            if message.startswith("T: ACK"):
-                with acksBufferLock:
-                    if len(acksBuffer) < 1:
-                        acksBuffer.append(message)
-            else:
-                with callsBufferLock:
-                    pckgBuffer.append(message)
+        try:
+            valid, alert, endAddress, alertRxCurrState = receive(alertSocket, bufferSize, alertRxCurrState, headerSize)
+            if valid:
+                #TODO: Processar a mensagem de alerta recebida do servidor
+                mensagem_alerta = alert.decode().strip()
+                with alertLock:
+                    print(f"\r[ALERTA DO SERVIDOR]: {mensagem_alerta}\n>> ", end="", flush=True)
+        except:
+            pass
+
+
+# =================================== Funções auxiliares ===================================
+
+
+def splitCall(call):
+    command = call.split(";")[0].strip()
+    args = call.split(";")[1:]
+    match command:
+        case "T: LGN":
+            if len(args) == 2:
+                username = args[0].strip()
+                username = username.split(":")[1].strip()
+                seqNum = args[1].strip()
+                seqNum = seqNum.split(":")[1].strip()
+                return command, [username, seqNum]
+        case "T: ALERT_BID":
+            if len(args) == 2:
+                name = args[0].strip()
+                name = name.split(":")[1].strip()
+                price = args[1].strip()
+                price = price.split(":")[1].strip()
+                return command, [name, price]
+        case "T: ALERT_WIN":
+            if len(args) == 2:
+                name = args[0].strip()
+                name = name.split(":")[1].strip()
+                price = args[1].strip()
+                price = price.split(":")[1].strip()
+                return command, [name, price]
+        case _:
+            return "", []
 
 
 # ================================== Configuração Inicial ==================================
 
 
 clientSocket = socket(AF_INET, SOCK_DGRAM)
+alertSocket = socket(AF_INET, SOCK_DGRAM)
 serverAddress = (gethostbyname("localhost"), 12000)
 headerSize = 1
 bufferSize = 1024
@@ -222,15 +254,14 @@ logedIn = False
 
 try:
     clientSocket.bind(('', 0))
+    alertSocket.bind(('', 0))
     socketPort = clientSocket.getsockname()[1]
+    alertPort = alertSocket.getsockname()[1]
 except:
     print("Erro ao criar o socket. Encerrando o cliente.")
     exit(1)
 
-callsBuffer = []                        # Buffer para armazenar mensagens recebidas do servidor que ainda não foram processadas pela aplicação
-acksBuffer = []                         # Buffer para armazenar ACKs recebidos do servidor que ainda não foram processados pela aplicação
-callsBufferLock = threading.Lock()      # Lock para controlar o acesso ao buffer de mensagens recebidas do servidor
-acksBufferLock = threading.Lock()       # Lock para controlar o acesso ao buffer de ACKs recebidos do servidor
+alertLock = threading.Lock()  # Lock para controlar a permissão para alertas do servidor serem processadas pela aplicação
 
 print("Bem-vindo ao AuctionCin!")
 
@@ -244,7 +275,7 @@ while not logedIn:
         else:
             print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
 
-    messageTx = f"T: LGN; UN: {userName};"
+    messageTx = f"T: LGN; UN: {userName}; AP: {alertPort}; SQ: 0"
     messageRx = None
     ready = False
     lastPckg = b""
@@ -253,22 +284,26 @@ while not logedIn:
     valid = False
     while not valid:
         valid, messageRx, endAddress, rxCurrState = receive(clientSocket, bufferSize, rxCurrState, headerSize)
-    if valid:
-        messageRx = (messageRx.decode()).strip().split(";")
-        if messageRx[0] == "T: LGN_OK":
-            print(f'[{userName}]: Login bem-sucedido. Bem-vindo ao AuctionCin!')
-            logedIn = True
-        elif messageRx[0] == "T: LGN_FAIL":
-            if messageRx[1].strip() == "RSN: NAME_TAKEN":
-                print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
-            else:
-                print(f'[{userName}]: Login falhou. Motivo desconhecido.')
-            userName = None
+    messageRx = (messageRx.decode()).strip().split(";")
+    if messageRx[0] == "T: LGN_FAIL":
+        if messageRx[1].strip() == "RSN: NAME_TAKEN":
+            print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
+        else:
+            print(f'[{userName}]: Login falhou. Motivo desconhecido.')
+        userName = None
+    elif messageRx[0] == "T: LGN_OK":
+        print(f'[{userName}]: Login bem-sucedido. Bem-vindo ao AuctionCin!')
+        logedIn = True
 
-activeListenerThread = threading.Thread(target=activeListener, args=(clientSocket, bufferSize, callsBuffer, headerSize, callsBufferLock, acksBufferLock))
-activeListenerThread.daemon = True
-activeListenerThread.start()
-#...
-activeListenerThread.join()
+activeAlertListenerThread = threading.Thread(target=activeAlertListener, args=(alertSocket, bufferSize, headerSize))
+activeAlertListenerThread.daemon = True
+activeAlertListenerThread.start()
+
+while logedIn:
+    command = input(">> ").strip()
+    with alertLock:
+        pass
+    #TODO: FAZER TODO O RESTO DEPOIS! TO CANSADO!
+
 
 #DONE: Funções do RDT 3.0 (rdtsend e receive), thread de ouvinte ativo para mensagens do servidor (activeListener), configuração inicial do cliente, comando de login e tratamento de resposta do servidor ao login (incluindo casos de falha)
