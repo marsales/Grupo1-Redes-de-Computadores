@@ -21,7 +21,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     # Obs2.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs3.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     
-    prob = 0.9                                 # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 1.1                                 # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout

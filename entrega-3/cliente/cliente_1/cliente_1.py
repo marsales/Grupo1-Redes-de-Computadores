@@ -1,35 +1,25 @@
 from socket import *
 from pathlib import Path
-import ast
 import random
 import threading
-import time 
+import os
 
-class Item:
-    name = None
-    price = 0.0
-    bidder_username = None
-    content = None
-    time = 60    
 
 # ======================================= Definições =======================================
-
 
 WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4         # estados possíveis do transmissor RDT 3.0
 Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor RDT 3.0
 
-
 # =================================== Funções do RDT 3.0 ===================================
 
-
-# Envio de pacotes aos clientes
+# Envio de pacotes ao servidor
 def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     
     # Obs1.: a variável 'count' é apenas para fins de debug, para indicar o número do pacote que estamos enviando
     # Obs2.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs3.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     
-    prob = 1.1                               # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 1.1                                 # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -116,128 +106,160 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     return txNextState, pckg, ready
 
 
-# Recebimento de pacotes dos clientes
-userListState = {}
-def receive(socket, bufferSize, headerSize = 1):
-    prob = 1.1                    # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
+# Recebimento de pacotes do servidor
+def receive(socket, bufferSize, rxCurrState, headerSize = 1):
+    prob = 1.1                      # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # Estados possíveis do receptor RDT 3.0
     message = None                  # Conteúdo do pacote recebido, caso ele seja válido
-    endAddress = None               # Endereço do remetente do pacote recebido, caso ele seja válido
+    endAddress = None               # Endereço do remetente dopacote recebido, caso ele seja válido
     valid = False                   # Se o pacote recebido é válido (ou seja, tem o SeqNum esperado e chegou algo)
-
-    socket.settimeout(None)
-    pckg, endAddress = socket.recvfrom(bufferSize)
-    rxCurrState = userListState[endAddress] if endAddress in userListState else Wf0fB
-    userListState[endAddress] = rxCurrState
-    rxNextState = rxCurrState
+    rxNextState = rxCurrState       # A priori, o estado se mantém o mesmo
 
     match rxCurrState:
+
         # Se está esperando pacote 0
         case 5: #Wf0fB
-            seqNum = pckg[:headerSize].decode()                 
-            content = pckg[headerSize:]    
-                
-            if seqNum == "0":
-                if(random.random() < prob):
-                    socket.sendto("T: ACK; NUM: 0;".encode(), endAddress)
-                message = content
-                endAddress = endAddress
-                valid = True
-                rxNextState = Wf1fB
+
+            # Timeout para esperar o pacote do destino
+            socket.settimeout(None)      
+
+            # Tenta receber mensagem do servidor...                           
+            try:
+                pckg, endAddress = socket.recvfrom(bufferSize)
+
+                # Extrair o SeqNum e o conteúdo
+                seqNum = pckg[:headerSize].decode()                 
+                content = pckg[headerSize:]    
+
+                # Se recebeu pacote 0                 
+                if seqNum == "0":
+                    if(random.random() < prob):
+                        socket.sendto("T: ACK; NUM: 0;".encode(), endAddress)
+                    message = content
+                    endAddress = endAddress
+                    valid = True
+                    rxNextState = Wf1fB
 
                 # Se recebeu pacote 1
-            else:
-                # Reenviamos ACK 1
-                if(random.random() < prob):
-                    socket.sendto("T: ACK; NUM: 1;".encode(), endAddress)
+                else:
+                    # Reenviamos ACK 1
+                    if(random.random() < prob):
+                        socket.sendto("T: ACK; NUM: 1;".encode(), endAddress)
+            
+            # ...exceto se tiver ocorrido timeout
+            except timeout:
+                pass
 
         # Se está esperando pacote 1
         case 6: #Wf1fB
-            seqNum = pckg[:headerSize].decode()                 
-            content = pckg[headerSize:]  
-                    
-            if seqNum == "1":
-                if(random.random() < prob):
-                    socket.sendto("T: ACK; NUM: 1;".encode(), endAddress)
-                message = content
-                endAddress = endAddress
-                valid = True
-                rxNextState = Wf0fB
 
-            else:
-                # Reenviamos ACK 0
-                if(random.random() < prob):
-                    socket.sendto("T: ACK; NUM: 0;".encode(), endAddress)
+            # Timeout para esperar o pacote do destino
+            socket.settimeout(None)  
 
-    userListState[endAddress] = rxNextState
+            # Tenta receber mensagem do servidor...                               
+            try:
+                pckg, endAddress = socket.recvfrom(bufferSize)   
+
+                # Extrair o SeqNum e o conteúdo 
+                seqNum = pckg[:headerSize].decode()                 
+                content = pckg[headerSize:]  
+
+                # Se recebeu pacote 1                      
+                if seqNum == "1":
+                    if(random.random() < prob):
+                        socket.sendto("T: ACK; NUM: 1;".encode(), endAddress)
+                    message = content
+                    endAddress = endAddress
+                    valid = True
+                    rxNextState = Wf0fB
+
+                # Se recebeu pacote 0
+                else:
+                    # Reenviamos ACK 0
+                    if(random.random() < prob):
+                        socket.sendto("T: ACK; NUM: 0;".encode(), endAddress)
+            
+            # ...exceto se tiver ocorrido timeout
+            except timeout:
+                pass
 
     # Retornar as novas variáveis      
-    return valid, message, endAddress
+    return valid, message, endAddress, rxNextState
 
 
-# =========================== Envio ativo de alertas do servidor ===========================
+# ================================== Threads ==================================
 
-bidBuffer = []                     # Buffer de mensagens de alerta de lances recebidas dos clientes que ainda não foram processadas pela aplicação
-bidBufferLock = threading.Lock()   # Lock para controlar o acesso ao buffer de mensagens de alerta de lances recebidas dos clientes
-def alertSend(socket, headerSize, itensTimeList, itemsList, userList, bidBuffer, bidBufferLock, bufferSize):
+# Buffers
+alertBuffer = []    # Buffer para armazenar alertas recebidos do servidor
+commandBuffer = []  # Buffer para armazenar comandos do usuário
+itemBuffer = []     # Buffer para armazenar informações de item arrematados recebidas do servidor
+
+# Locks
+alertLock = threading.Lock()   # Lock para controlar a permissão para alertas do servidor serem processadas pela aplicação
+commandLock = threading.Lock() # Lock para controlar a permissão para comandos do usuário serem processados pela aplicação
+itemLock = threading.Lock()    # Lock para controlar a permissão para informações de item arrematados serem processadas pela aplicação
+
+# Thread para ouvir mensagens do servidor
+def alertListener(alertSocket, bufferSize, headerSize):
+    alertRxCurrState = Wf0fB
     while True:
-        if len(bidBuffer) > 0:
-            with bidBufferLock:
-                bid = bidBuffer.pop(0)
-            item_name = bid[0]
-            item_price = bid[1]
-            bidder_username = bid[2]
-            itemsList[item_name].price = item_price
-            itemsList[item_name].bidder_username = bidder_username
-            for user in userList.keys():
-                alertAddress = userList[user][1]
-                alertSeqNum = userList[user][3]
-                endAddressDst = user
-                response = f"T: ALERT_BID; BUN: {bidder_username}; IT: {item_name}; PR: {item_price}"
-                txCurrState = WfC0fA if alertSeqNum == 0 else WfC1fA
-                lastPkg = b''
-                ready = False
-                while not ready:
-                    txCurrState, lastPkg, ready = rdtsend(response.encode(), socket, alertAddress, bufferSize, txCurrState, lastPkg)
-                userList[endAddressDst] = [userList[user][0], userList[user][1], userList[user][2], 1 if alertSeqNum == 0 else 0]
-        for item_name in list(itensTimeList.keys()):
-            itensTimeList[item_name] -= 1
-            if itensTimeList[item_name] % 20 == 0:
-                print(f"Tempo restante para o item {item_name}: {itensTimeList[item_name]} segundos")
-            if itensTimeList[item_name] <= 0:
-                del itensTimeList[item_name]
-                item_name = item_name
-                item_content = itemsList[item_name].content
-                item_price = itemsList[item_name].price
-                winner_username = itemsList[item_name].bidder_username
-                del itemsList[item_name]
-                for user in userList.keys():
-                    alertAddress = userList[user][1]
-                    alertSeqNum = userList[user][3]
-                    endAddressDst = user
-                    if winner_username == None:
-                        response = f"T: ALERT_CL; IT: {item_name};"
-                    else:
-                        response = f"T: ALERT_WIN; WUN: {winner_username}; IT: {item_name}; PR: {item_price}"
-                    txCurrState = WfC0fA if alertSeqNum == 0 else WfC1fA
-                    lastPkg = b''
-                    ready = False
-                    while not ready:
-                        txCurrState, lastPkg, ready = rdtsend(response.encode(), socket, alertAddress, bufferSize, txCurrState, lastPkg)
-                    userList[endAddressDst] = [userList[user][0], userList[user][1], userList[user][2], 1 if alertSeqNum == 0 else 0]
-                    if userList[user][0] == winner_username:
-                        print(f"Enviando item finalizado para o usuário {userList[user] [0]}: {response}")
-                        response = f"T: ITEM; NAME: {item_name}; CTNT: {item_content}"
-                        txCurrState = WfC0fA if alertSeqNum == 0 else WfC1fA
-                        lastPkg = b''
-                        ready = False
-                        while not ready:
-                            txCurrState, lastPkg, ready = rdtsend(response.encode(), socket, alertAddress, bufferSize, txCurrState, lastPkg)
-                        userList[endAddressDst] = [userList[user][0], userList[user][1], userList[user][2], 1 if alertSeqNum == 0 else 0]
-        time.sleep(1)
-            
+        valid, call, endAddress, alertRxCurrState = receive(alertSocket, bufferSize, alertRxCurrState, headerSize)
+        if valid:
+            call = splitCall(call.decode())
+            if call[0] in ["T: ALERT_BID", "T: ALERT_WIN"]:
+                with alertLock:
+                    alertBuffer.append(call)
+            if call[0] == "T: ITEM":
+                with itemLock:
+                    itemBuffer.append(call)
+
+# Thread para enviar comandos para o servidor
+def activeUserInputListener():
+    while True:
+        command = input(">> ").strip()
+        with commandLock:
+            commandBuffer.append(command)
+
 
 # =================================== Funções auxiliares ===================================
+
+
+def commandToCall(command, alert_port):
+    parts = command.split()
+
+    if len(parts) == 0:
+        return None
+
+    if parts[0].lower() == "login":
+        if len(parts) < 2:
+            return None
+        username = " ".join(parts[1:])
+        return f"T: LGN; UN: {username}; AP: {alert_port}; SQ: 1; ASQ: 0"
+
+    elif parts[0].lower() == "bid":
+        if len(parts) != 3:
+            return None
+        id_item = parts[1]
+        val = parts[2]
+        return f"T: BID; IT: {id_item}; PR: {val}"
+
+    elif parts[0].lower() == "list":
+        if len(parts) != 1:
+            return None
+        return "T: LST"
+
+    elif parts[0].lower() == "status":
+        if len(parts) == 2:
+            id_item = parts[1]
+            return f"T: STS; IT: {id_item}"
+        return None
+
+    elif parts[0].lower() == "logout":
+        if len(parts) != 1:
+            return None
+        return "T: LGO"
+
+    return None
 
 def splitCall(call):
     command = call.split(";")[0].strip()
@@ -373,6 +395,7 @@ def splitCall(call):
                 return command, [winner_username, name, price]
             else:
                 return command, []
+            
         case "T: ALERT_CL":                 # T: ALERT_CL; IT: <item_name>;
             if len(args) == 1:
                 name = args[0].strip()
@@ -380,6 +403,7 @@ def splitCall(call):
                 return command, [name]
             else:
                 return command, []
+            
         case "T: ITEM":                     # T: ITEM; NAME: <item_name>; CTNT: <item_content>; 
             if len(args) == 2:
                 name = args[0].strip()
@@ -397,97 +421,203 @@ def splitCall(call):
                 return command, [name]
             else:
                 return command, [] 
+            
         case _:
             return "", []
-        
 
-def addItem(name, content, price, time):
-    item = Item()
-    item.name = name
-    item.bidder_username = None
-    item.content = content
-    item.price = price
-    item.time = time
-    itemsList[name] = item
-    itemsTimeList[name] = time
-    print(f"Item adicionado: {name}, preço: {price}, tempo: {time} segundos")
+
+def sendCallAndWaitResponse(call):
+    global txCurrState
+    global rxCurrState
+
+    ready = False
+    lastPckg = b""
+
+    while not ready:
+        txCurrState, lastPckg, ready = rdtsend(
+            call.encode(),
+            clientSocket,
+            serverAddress,
+            bufferSize,
+            txCurrState,
+            lastPckg
+        )
+
+    valid = False
+    messageRx = None
+
+    while not valid:
+        valid, messageRx, endAddress, rxCurrState = receive(
+            clientSocket,
+            bufferSize,
+            rxCurrState,
+            headerSize
+        )
+    return splitCall(messageRx.decode())
 
 
 # ================================== Configuração Inicial ==================================
 
-bufferSize = 1024                             # Tamanho de um pacote
-headerSize = 1                                # Tamanho do header do pacote, onde fica o SeqNum
-messageSize = bufferSize - headerSize         # Tamanho do conteúdo do pacote
-serverPort = 12000                            # Nº da porta utilizada
-serverSocket = socket(AF_INET, SOCK_DGRAM)    # Socket do servidor, definido IPv4 e UDP
-serverSocket.bind(('', serverPort))           # Registro de como contatar os clientes (qualquer formato + porta)
 
-callsBuffer = []                     # Buffer de mensagens recebidas dos clientes que ainda não foram processadas pela aplicação
-callsBufferLock = threading.Lock()   # Lock para controlar o acesso ao buffer de mensagens recebidas dos clientes
+clientSocket = socket(AF_INET, SOCK_DGRAM)
+alertSocket = socket(AF_INET, SOCK_DGRAM)
+serverAddress = (gethostbyname("localhost"), 12000)
+headerSize = 1
+bufferSize = 1024
+messageSize = bufferSize - headerSize
+txCurrState = WfC0fA
+rxCurrState = Wf0fB
+userName = None
+logedIn = False
 
-userList = {}  # Usuários logados{username: (ip, port)}
-itemsList = {} # Itens do leilão, no formato
-itemsTimeList = {} # Tempo restante para cada item do leilão, no formato {item_name: time_remaining}
+try:
+    clientSocket.bind(('', 0))
+    alertSocket.bind(('', 0))
+    socketPort = clientSocket.getsockname()[1]
+    alertPort = alertSocket.getsockname()[1]
+    alertAddress = (gethostbyname("localhost"), alertPort)
+except:
+    print("Erro ao criar o socket. Encerrando o cliente.")
+    exit(1)
 
-addItem("item1", "content1", 10.0, 30)
-addItem("item2", "content2", 20.0, 30)
+alertLock = threading.Lock()  # Lock para controlar a permissão para alertas do servidor serem processadas pela aplicação
 
-threadAlertSend = threading.Thread(target=alertSend, args=(serverSocket, headerSize, itemsTimeList, itemsList, userList, bidBuffer, bidBufferLock, bufferSize))
-threadAlertSend.start()
+print("Bem-vindo ao AuctionCin!")
 
-while True:
+while not logedIn:
+    print("Digite o comando 'login <nome_do_usuario>' para se conectar ao servidor e participar dos leilões.")
+    while not userName:
+        command = input(">> ").strip()
+        parts = command.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "login":
+            userName = parts[1]
+        else:
+            print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
+
+    messageTx = f"T: LGN; UN: {userName}; AP: {alertAddress}; SQ: 0; ASQ: 0"
+    messageRx = None
+    ready = False
+    lastPckg = b""
+    while not ready:
+        txCurrState, lastPckg, ready = rdtsend(messageTx.encode(), clientSocket, serverAddress, bufferSize, txCurrState, lastPckg)
     valid = False
-    copyUserListState = userListState.copy()
     while not valid:
-        valid, message, endAddress = receive(serverSocket, bufferSize, headerSize)
-    call = splitCall(message.decode().strip())
-    lastPkg = b''
-    match call[0]:
-        case "T: LGN":
-            print(f"Mensagem de login recebida do destino {endAddress}: {message.decode().strip()}")
-            txCurrState = WfC0fA
-            username, alertPort, sSeqNum, alertSeqNum = call[1]
-            if isinstance(alertPort, str):
-                alertPort = ast.literal_eval(alertPort) if alertPort.startswith("(") else (endAddress[0], int(alertPort))
-            if username in [user[0] for user in userList.values()]:
-                response = f"T: LGN_FAIL; RSN: NAME_TAKEN"
-                userListState = copyUserListState.copy()
-                ready = False
-                while not ready:
-                    txCurrState, lastPkg, ready = rdtsend(response.encode(), serverSocket, endAddress, bufferSize, txCurrState, lastPkg)
+        valid, messageRx, endAddress, rxCurrState = receive(clientSocket, bufferSize, rxCurrState, headerSize)
+    print("foi\n")
+    messageRx = (messageRx.decode()).strip().split(";")
+    if messageRx[0] == "T: LGN_FAIL":
+        if messageRx[1].strip() == "RSN: NAME_TAKEN":
+            print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
+        else:
+            print(f'[{userName}]: Login falhou. Motivo desconhecido.')
+        userName = None
+        txCurrState = WfC0fA
+        rxCurrState = Wf0fB
+    elif messageRx[0] == "T: LGN_OK":
+        print(f'[{userName}]: Você está online!')
+        logedIn = True
+
+#os.makedirs(f"cliente_{userName}", exist_ok=True)
+
+alertListenerThread = threading.Thread(target=alertListener, args=(alertSocket, bufferSize, headerSize))
+alertListenerThread.start()
+activeUserInputListenerThread = threading.Thread(target=activeUserInputListener, args=())
+activeUserInputListenerThread.start()
+
+
+
+while logedIn:
+    
+    item = None
+    if len(itemBuffer) > 0:
+        with itemLock:
+            item = itemBuffer.pop(0) if itemBuffer else None
+
+    # Se tem item a salvar
+    if item:
+        itemName, content = item[1]
+
+        pastaCliente = Path(__file__).parent / f"cliente_{userName}"
+        caminho = pastaCliente / itemName
+
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        print(f"[{userName}] Item {itemName} recebido e salvo em: {caminho}")
+
+    item = None
+
+    # Se tem alerta para soltar
+    alert = None
+    if len(alertBuffer) > 0:
+        with alertLock:
+            alert = alertBuffer.pop(0) if alertBuffer else None
+    if alert:
+        print(f"{alert}")
+    alert = None
+
+    # Se tem comando para processar
+    command = None
+    if len(commandBuffer) > 0:
+        with commandLock:
+            command = commandBuffer.pop(0) if commandBuffer else None
+    if command:
+        callText = commandToCall(command, alertPort)
+
+        if callText is None:
+            print("Comando inválido. Use: list, status <id_item>, bid <id_item> <valor> ou logout.")
+            continue
+
+        call = splitCall(callText)
+
+
+        if call[0] == "T: LGN":
+            print("Você já está logado.")
+
+
+        elif call[0] == "T: BID":
+            response = sendCallAndWaitResponse(callText)
+
+            if response[0] == "T: BID_OK":
+                itemName, price = response[1]
+                print(f"Lance registrado: item {itemName}, valor R$ {price:.2f}")
+
+            elif response[0] == "T: BID_FAIL":
+                reason = response[1][0]
+                print(f"Lance recusado. Motivo: {reason}")
+
             else:
-                userList[endAddress] = [username, alertPort, int(sSeqNum), int(alertSeqNum)]
-                response = f"T: LGN_OK"
-                ready = False
-                while not ready:
-                    txCurrState, lastPkg, ready = rdtsend(response.encode(), serverSocket, endAddress, bufferSize, txCurrState, lastPkg)
-        case "T: LGO":
-            print(f"Mensagem de logout recebida do destino {endAddress}: {message.decode().strip()}")
-            if endAddress in userList:
-                username = userList[endAddress][0]
-                txCurrState = WfC0fA if userList[endAddress][2] == 1 else WfC1fA
-                del userList[endAddress]
-                response = f"T: LGO_OK; UN: {username}"
-                ready = False
-                while not ready:
-                    txCurrState, lastPkg, ready = rdtsend(response.encode(), serverSocket, endAddress, bufferSize, txCurrState, lastPkg)
-        case "T: BID":
-            print(f"Mensagem de lance recebida do destino {endAddress}: {message.decode().strip()}")
-            txCurrState = WfC0fA if userList[endAddress][2] == 1 else WfC1fA
-            item_name, item_price = call[1]
-            username = userList[endAddress][0]
-            if item_name in itemsList:
-                if item_price > itemsList[item_name].price:
-                    itemsList[item_name].price = item_price
-                    itemsList[item_name].bidder_username = username
-                    response = f"T: BID_OK; IT: {item_name}; PR: {item_price}"
-                    with bidBufferLock:
-                        bidBuffer.append((item_name, item_price, username))
-                else:
-                    response = f"T: BID_FAIL; RSN: PRICE_TOO_LOW"
+                print("Resposta inesperada do servidor:", response)
+
+
+        elif call[0] == "T: LST":
+            response = sendCallAndWaitResponse(callText)
+
+            if response[0] == "T: LST_RT":
+                print(response[1][0])
             else:
-                response = f"T: BID_FAIL; RSN: ITEM_NOT_FOUND"
-            ready = False
-            while not ready:
-                txCurrState, lastPkg, ready = rdtsend(response.encode(), serverSocket, endAddress, bufferSize, txCurrState, lastPkg)
-            userList[endAddress] = [userList[endAddress][0], userList[endAddress][1], txCurrState, userList[endAddress][3]]
+                print("Resposta inesperada do servidor:", response)
+
+
+        elif call[0] == "T: STS":
+            response = sendCallAndWaitResponse(callText)
+
+            if response[0] == "T: STS_RT":
+                bidUser, itemName, price = response[1]
+                print(f"Item: {itemName} | Maior lance: R$ {price:.2f} | Usuário: {bidUser}")
+            else:
+                print("Resposta inesperada do servidor:", response)
+
+
+        elif call[0] == "T: LGO":
+            response = sendCallAndWaitResponse(callText)
+
+            if response[0] == "T: LGO_OK":
+                print(f"[{userName}]: Logout realizado com sucesso.")
+                logedIn = False
+            else:
+                print("Falha no logout:", response)
+
+        else:
+            print("Comando inválido.")
+        
