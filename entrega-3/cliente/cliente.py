@@ -12,6 +12,9 @@ Wf0fB, Wf1fB = 5, 6                             # estados possíveis do receptor
 
 # =================================== Funções do RDT 3.0 ===================================
 
+pendingBuffer = []                     # Buffer de mensagens recebidas dos clientes que ainda não foram processadas pela aplicação
+pendingBufferLock = threading.Lock()   # Lock para controlar o acesso ao buffer de mensagens recebidas dos clientes
+
 # Envio de pacotes ao servidor
 def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     
@@ -19,7 +22,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     # Obs2.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs3.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     
-    prob = 1.1                                 # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 0.85                                # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -58,6 +61,19 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
                     ready = True
                     txNextState = WfC1fA
 
+                else:
+
+                    seqNum = ack[:1].decode(errors='ignore')
+
+                    if endAddress == endAddressDst and seqNum in ["0", "1"]:
+                        socket.sendto(f"T: ACK; NUM: {seqNum};".encode(), endAddress)
+
+                    with pendingBufferLock:
+                        pendingBuffer.append((ack, endAddress))
+
+                    ready = False
+                    txNextState = WfA0
+
             # ...exceto se tiver ocorrido timeout
             except timeout:
 
@@ -95,6 +111,19 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
                     ready = True
                     txNextState = WfC0fA
 
+                else:
+
+                    seqNum = ack[:1].decode(errors='ignore')
+
+                    if endAddress == endAddressDst and seqNum in ["0", "1"]:
+                        socket.sendto(f"T: ACK; NUM: {seqNum};".encode(), endAddress)
+
+                    with pendingBufferLock:
+                        pendingBuffer.append((ack, endAddress))
+
+                    ready = False
+                    txNextState = WfA1
+
             # ...exceto se tiver ocorrido timeout
             except timeout:
 
@@ -108,12 +137,17 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
 
 # Recebimento de pacotes do servidor
 def receive(socket, bufferSize, rxCurrState, headerSize = 1):
-    prob = 1.1                      # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
+    prob = 0.85                     # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # Estados possíveis do receptor RDT 3.0
     message = None                  # Conteúdo do pacote recebido, caso ele seja válido
     endAddress = None               # Endereço do remetente dopacote recebido, caso ele seja válido
     valid = False                   # Se o pacote recebido é válido (ou seja, tem o SeqNum esperado e chegou algo)
     rxNextState = rxCurrState       # A priori, o estado se mantém o mesmo
+
+    bufferedPack = None
+    with pendingBufferLock:
+        if socket is clientSocket and len(pendingBuffer) > 0:
+            bufferedPack = pendingBuffer.pop(0)
 
     match rxCurrState:
 
@@ -125,7 +159,7 @@ def receive(socket, bufferSize, rxCurrState, headerSize = 1):
 
             # Tenta receber mensagem do servidor...                           
             try:
-                pckg, endAddress = socket.recvfrom(bufferSize)
+                pckg, endAddress = bufferedPack if bufferedPack is not None else socket.recvfrom(bufferSize)
 
                 # Extrair o SeqNum e o conteúdo
                 seqNum = pckg[:headerSize].decode()                 
@@ -158,7 +192,7 @@ def receive(socket, bufferSize, rxCurrState, headerSize = 1):
 
             # Tenta receber mensagem do servidor...                               
             try:
-                pckg, endAddress = socket.recvfrom(bufferSize)   
+                pckg, endAddress = bufferedPack if bufferedPack is not None else socket.recvfrom(bufferSize)   
 
                 # Extrair o SeqNum e o conteúdo 
                 seqNum = pckg[:headerSize].decode()                 
@@ -206,17 +240,17 @@ def alertListener(alertSocket, bufferSize, headerSize):
         valid, call, endAddress, alertRxCurrState = receive(alertSocket, bufferSize, alertRxCurrState, headerSize)
         if valid:
             call = splitCall(call.decode())
-            if call[0] in ["T: ALERT_BID", "T: ALERT_WIN"]:
+            if call[0] in ["T: ALERT_BID", "T: ALERT_WIN", "T: ALERT_CL"]:
                 with alertLock:
                     alertBuffer.append(call)
-            if call[0] == "T: ITEM":
+            if call[0] in ["T: ITEM", "T: ITEM_EOF"]:
                 with itemLock:
                     itemBuffer.append(call)
 
 # Thread para enviar comandos para o servidor
 def activeUserInputListener():
     while True:
-        command = input(">> ").strip()
+        command = input().strip()
         with commandLock:
             commandBuffer.append(command)
 
@@ -265,7 +299,8 @@ def splitCall(call):
     command = call.split(";")[0].strip()
     args = call.split(";")[1:]
     match command:
-
+        
+        # Solicitação de login
         case "T: LGN":                      # T: LGN; UN: <username>; AP: <alert_port>; SQ: <seqNum>; ASQ: <alertSeqNum>;
             if len(args) == 4:
                 username = args[0].strip()
@@ -279,7 +314,8 @@ def splitCall(call):
                 return command, [username, alertPort, seqNum, alertSeqNum]
             else:
                 return command, []
-            
+        
+        # Comando para repassar um erro de login
         case "T: LGN_FAIL":                 # T: LGN_FAIL; RSN: <reason>;
             if len(args) == 1:
                 reason = args[0].strip()
@@ -287,19 +323,22 @@ def splitCall(call):
                 return command, [reason]
             else:
                 return command, []
-            
+
+        # Solicitação de saída (logout)
         case "T: LGO":                      # T: LGO;
             if len(args) == 0:
                 return command, []
             else:
                 return command, []
-            
+
+        # Confirmação de que o logout foi bem sucedido 
         case "T: LGO_OK":                   # T: LGO_OK;
             if len(args) == 0:
                 return command, []
             else:
                 return command, []
-            
+
+        # Erro caso logout falhe (retorna motivo) 
         case "T: LGO_FAIL":                 # T: LGO_FAIL; RSN: <reason>;
             if len(args) == 1:
                 reason = args[0].strip()
@@ -308,6 +347,7 @@ def splitCall(call):
             else:
                 return command, []
 
+        # Comando requisitando o status de um item específico
         case "T: STS":                      # T: STS; IT: <item_name>;
             if len(args) == 0:
                 return command, []
@@ -317,7 +357,8 @@ def splitCall(call):
                 return command, [name]
             else:
                 return command, []
-            
+
+        # Retorno de consulta de status com quem está ganhando, que item é, e o preço atual  
         case "T: STS_RT":                   # T: STS_OK; BUN: <bid_username>; IT: <item_name>; PR: <price>;
             if len(args) == 3:
                 bid_username = args[0].strip()
@@ -330,16 +371,18 @@ def splitCall(call):
             else:
                 return command, []
             
-        case "T: BID":                      # T: BID; IT: <item_name>; PR: <price>;
+        # Cliente efetuando um lance (bid) sobre um item
+        case "T: BID":                      # T: BID; ITI: <item_id>; PR: <price>;
             if len(args) == 2:
-                name = args[0].strip()
-                name = name.split(":")[1].strip()
+                item_id = args[0].strip()
+                item_id = int(item_id.split(":")[1].strip())
                 price = args[1].strip()
                 price = float(price.split(":")[1].strip())
-                return command, [name, price]
+                return command, [item_id, price]
             else:
                 return command, []
 
+        # Retorno de sucesso num lance efetuado
         case "T: BID_OK":                   # T: BID_OK; IT: <item_name>; PR: <price>;
             if len(args) == 2:
                 name = args[0].strip()
@@ -350,6 +393,7 @@ def splitCall(call):
             else:
                 return command, []
             
+        # Erro num lance efetuado, falhou ou valor foi inferior, retornando razão
         case "T: BID_FAIL":                 # T: BID_FAIL; RSN: <reason>;
             if len(args) == 1:
                 reason = args[0].strip()
@@ -357,21 +401,39 @@ def splitCall(call):
                 return command, [reason]
             else:
                 return command, []
-            
+
+        # Pedido do cliente para receber lista com todos os itens disponíveis
         case "T: LST":                      # T: LST;
             if len(args) == 0:
                 return command, []
             else:
                 return command, []
 
-        case "T: LST_RT":                   # T: LST_RT; CTNT: <list_content>;
-            if len(args) == 1:
-                content = args[0].strip()
-                content = content.split(":")[1].strip()
-                return command, [content]
+        # Mensagem do servidor contendo os dados de UM item contido na lista solicitada
+        case "T: LST_ITEM":                 # T: LST_ITEM; NAME: <item_name>; ID: <item_id>; PR: <price>; RST_L: <remaining_lots>; TM: <time_remaining>;
+            if len(args) == 5:
+                name = args[0].strip()
+                name = name.split(":")[1].strip()
+                id = args[1].strip()
+                id = int(id.split(":")[1].strip())
+                price = args[2].strip()
+                price = float(price.split(":")[1].strip())
+                remaining_lots = args[3].strip()
+                remaining_lots = int(remaining_lots.split(":")[1].strip())
+                time_remaining = args[4].strip()
+                time_remaining = int(time_remaining.split(":")[1].strip())
+                return command, [name, id, price, remaining_lots, time_remaining]
+            else:   
+                return command, []
+        
+        # Servidor marcando que terminou de enviar os itens da lista
+        case "T: LST_END":                  # T: LST_END;
+            if len(args) == 0:
+                return command, []
             else:
                 return command, []
-            
+
+        # Pacote de alerta do servidor para todos dizendo que houve um lance válido em um item
         case "T: ALERT_BID":                # T: ALERT_BID; BUN: <bid_username>; IT: <item_name>; PR: <price>;
             if len(args) == 3:
                 bid_username = args[0].strip()
@@ -383,7 +445,8 @@ def splitCall(call):
                 return command, [bid_username, name, price]
             else:
                 return command, []
-            
+
+        # Pacote de alerta do servidor para todos indicando quem foi o ganhador ao final do tempo 
         case "T: ALERT_WIN":                # T: ALERT_WIN; WUN: <winner_username>; IT: <item_name>; PR: <price>;
             if len(args) == 3:
                 winner_username = args[0].strip()
@@ -396,6 +459,7 @@ def splitCall(call):
             else:
                 return command, []
             
+        # Pacote de alerta dizendo que o leilão acabou mas fechou vazio
         case "T: ALERT_CL":                 # T: ALERT_CL; IT: <item_name>;
             if len(args) == 1:
                 name = args[0].strip()
@@ -404,6 +468,7 @@ def splitCall(call):
             else:
                 return command, []
             
+        # Transmissão final do prêmio/conteúdo para o ganhador
         case "T: ITEM":                     # T: ITEM; NAME: <item_name>; CTNT: <item_content>; 
             if len(args) == 2:
                 name = args[0].strip()
@@ -414,6 +479,7 @@ def splitCall(call):
             else:
                 return command, []
             
+        # Marca o fim do conteúdo recebido de uma transmissão de item 
         case "T: ITEM_EOF":                 # T: ITEM_EOF; NAME: <item_name>;
             if len(args) == 1:
                 name = args[0].strip()
@@ -456,6 +522,22 @@ def sendCallAndWaitResponse(call):
     return splitCall(messageRx.decode())
 
 
+def waitReturnResponse():
+    global rxCurrState
+
+    valid = False
+    messageRx = None
+
+    while not valid:
+        valid, messageRx, endAddress, rxCurrState = receive(
+            clientSocket,
+            bufferSize,
+            rxCurrState,
+            headerSize
+        )
+    return splitCall(messageRx.decode())
+
+
 # ================================== Configuração Inicial ==================================
 
 
@@ -480,144 +562,178 @@ except:
     print("Erro ao criar o socket. Encerrando o cliente.")
     exit(1)
 
-alertLock = threading.Lock()  # Lock para controlar a permissão para alertas do servidor serem processadas pela aplicação
-
-print("Bem-vindo ao AuctionCin!")
-
-while not logedIn:
-    print("Digite o comando 'login <nome_do_usuario>' para se conectar ao servidor e participar dos leilões.")
-    while not userName:
-        command = input(">> ").strip()
-        parts = command.split(" ", 1)
-        if len(parts) == 2 and parts[0].lower() == "login":
-            userName = parts[1]
-        else:
-            print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
-
-    messageTx = f"T: LGN; UN: {userName}; AP: {alertAddress}; SQ: 0; ASQ: 0"
-    messageRx = None
-    ready = False
-    lastPckg = b""
-    while not ready:
-        txCurrState, lastPckg, ready = rdtsend(messageTx.encode(), clientSocket, serverAddress, bufferSize, txCurrState, lastPckg)
-    valid = False
-    while not valid:
-        valid, messageRx, endAddress, rxCurrState = receive(clientSocket, bufferSize, rxCurrState, headerSize)
-    print("foi\n")
-    messageRx = (messageRx.decode()).strip().split(";")
-    if messageRx[0] == "T: LGN_FAIL":
-        if messageRx[1].strip() == "RSN: NAME_TAKEN":
-            print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
-        else:
-            print(f'[{userName}]: Login falhou. Motivo desconhecido.')
-        userName = None
-        txCurrState = WfC0fA
-        rxCurrState = Wf0fB
-    elif messageRx[0] == "T: LGN_OK":
-        print(f'[{userName}]: Você está online!')
-        logedIn = True
-
-#os.makedirs(f"cliente_{userName}", exist_ok=True)
-
 alertListenerThread = threading.Thread(target=alertListener, args=(alertSocket, bufferSize, headerSize))
 alertListenerThread.start()
 activeUserInputListenerThread = threading.Thread(target=activeUserInputListener, args=())
 activeUserInputListenerThread.start()
 
+print("Bem-vindo ao AuctionCin!")
+
+while True:
+    print("Digite o comando 'login <nome_do_usuario>' para se conectar ao servidor e participar dos leilões.")
+    while not logedIn:
+        while not userName:
+            command = None
+            userName = None
+            if len(commandBuffer) > 0:
+                with commandLock:
+                    command = commandBuffer.pop(0) if commandBuffer else None
+                parts = command.split(" ", 1)
+                if len(parts) == 2 and parts[0].lower() == "login":
+                    userName = parts[1]
+                else:
+                    print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
+
+        messageTx = f"T: LGN; UN: {userName}; AP: {alertAddress}; SQ: 0; ASQ: 0"
+        messageRx = None
+        ready = False
+        lastPckg = b""
+        while not ready:
+            txCurrState, lastPckg, ready = rdtsend(messageTx.encode(), clientSocket, serverAddress, bufferSize, txCurrState, lastPckg)
+        valid = False
+        while not valid:
+            valid, messageRx, endAddress, rxCurrState = receive(clientSocket, bufferSize, rxCurrState, headerSize)
+        messageRx = (messageRx.decode()).strip().split(";")
+        if messageRx[0] == "T: LGN_FAIL":
+            if messageRx[1].strip() == "RSN: NAME_TAKEN":
+                print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
+            else:
+                print(f'[{userName}]: Login falhou. Motivo desconhecido.')
+            userName = None
+            txCurrState = WfC0fA
+            rxCurrState = Wf0fB
+        elif messageRx[0] == "T: LGN_OK":
+            print(f'[{userName}]: Você está online!')
+            logedIn = True
+
+    os.makedirs(f"cliente_{userName}", exist_ok=True)
+
+    while logedIn:
+
+        item = None
+        if len(itemBuffer) > 0:
+            with itemLock:
+                item = itemBuffer.pop(0) if itemBuffer else None
+
+        # Se tem item a salvar
+        if item:
+            itemName, content = item[1]
+
+            pastaCliente = Path(__file__).parent / f"cliente_{userName}"
+            caminho = pastaCliente / f'{itemName}.txt'
 
 
-while logedIn:
-    
-    item = None
-    if len(itemBuffer) > 0:
-        with itemLock:
-            item = itemBuffer.pop(0) if itemBuffer else None
+            with open(caminho, "w", encoding="utf-8") as f:
+                f.write(content)
 
-    # Se tem item a salvar
-    if item:
-        itemName, content = item[1]
+            print(f"[{userName}] Item {itemName} recebido e salvo em: {caminho}")
+        item = None
 
-        pastaCliente = Path(__file__).parent / f"cliente_{userName}"
-        caminho = pastaCliente / itemName
+        # Se tem alerta para soltar
+        alert = None
+        if len(alertBuffer) > 0:
+            with alertLock:
+                alert = alertBuffer.pop(0) if alertBuffer else None
+        if alert:
+            if alert[0] == "T: ALERT_BID":
+                print(f"Novo Lance: {alert[1][0]} deu R$ {alert[1][2]:.2f} no item {alert[1][1]}")
 
-        with open(caminho, "w", encoding="utf-8") as f:
-            f.write(content)
+            if alert[0] == "T: ALERT_WIN":
+                print(f"Item vendido: {alert[1][0]} arrematou {alert[1][1]} por R$ {alert[1][2]:.2f}")
 
-        print(f"[{userName}] Item {itemName} recebido e salvo em: {caminho}")
+            if alert[0] == "T: ALERT_CL":
+                print(f"Leilão de {alert[1][0]} encerrado sem lances")
+            if alert[0] == "T: ITEM":
+                print(f"Recebendo {alert[1][0]}")
 
-    item = None
+        alert = None
 
-    # Se tem alerta para soltar
-    alert = None
-    if len(alertBuffer) > 0:
-        with alertLock:
-            alert = alertBuffer.pop(0) if alertBuffer else None
-    if alert:
-        print(f"{alert}")
-    alert = None
+        # Se tem comando para processar
+        command = None
+        if len(commandBuffer) > 0:
+            with commandLock:
+                command = commandBuffer.pop(0) if commandBuffer else None
+        if command:
+            callText = commandToCall(command, alertPort)
 
-    # Se tem comando para processar
-    command = None
-    if len(commandBuffer) > 0:
-        with commandLock:
-            command = commandBuffer.pop(0) if commandBuffer else None
-    if command:
-        callText = commandToCall(command, alertPort)
+            if callText is None:
+                print("Comando inválido. Use: list, status <id_item>, bid <id_item> <valor> ou logout.")
+                continue
 
-        if callText is None:
-            print("Comando inválido. Use: list, status <id_item>, bid <id_item> <valor> ou logout.")
-            continue
-
-        call = splitCall(callText)
+            call = splitCall(callText)
 
 
-        if call[0] == "T: LGN":
-            print("Você já está logado.")
+            if call[0] == "T: LGN":
+                print("Você já está logado.")
 
 
-        elif call[0] == "T: BID":
-            response = sendCallAndWaitResponse(callText)
+            elif call[0] == "T: BID":
+                response = sendCallAndWaitResponse(callText)
 
-            if response[0] == "T: BID_OK":
-                itemName, price = response[1]
-                print(f"Lance registrado: item {itemName}, valor R$ {price:.2f}")
+                if response[0] == "T: BID_OK":
+                    itemName, price = response[1]
+                    print(f"Lance registrado: item {itemName}, valor R$ {price:.2f}")
 
-            elif response[0] == "T: BID_FAIL":
-                reason = response[1][0]
-                print(f"Lance recusado. Motivo: {reason}")
+                elif response[0] == "T: BID_FAIL":
+                    reason = response[1][0]
+                    if reason == "ITEM_NOT_FOUND":
+                        print(f"Lance recusado. Motivo: Item indisponível.")
+                    if reason == "PRICE_TOO_LOW":
+                        print(f"Lance recusado. Motivo: Seu lance foi muito baixo.")
+
+
+                else:
+                    print("Resposta inesperada do servidor:", response)
+
+
+            elif call[0] == "T: LST":
+
+                response = sendCallAndWaitResponse(callText)
+                itens = []
+
+                while response[0] != 'T: LST_END':
+                    nome = response[1][0]
+                    id = response[1][1]
+                    preco = response[1][2]
+                    restante = response[1][3]
+                    tempo = response[1][4]
+                    text = f"Item: {nome} | ID: {id} | Valor Atual: R$ {preco:.2f} | Lances antes de encerrar: {restante} | Tempo Restante: {tempo} segundos"
+                    itens.append(text)
+                    response = waitReturnResponse()
+
+                for item in itens:
+                    print(item)
+
+
+            elif call[0] == "T: STS":
+                response = sendCallAndWaitResponse(callText)
+
+                if response[0] == "T: STS_RT":
+                    bidUser, itemName, price = response[1]
+                    if bidUser == "None":
+                        print(f"Item: {itemName} | Sem Lances Ainda | Valor Inicial: R$ {price:.2f} ")
+                    else:
+                        print(f"Item: {itemName} | Maior lance: R$ {price:.2f} | Usuário: {bidUser}")
+                else:
+                    print("Resposta inesperada do servidor:", response)
+
+
+            elif call[0] == "T: LGO":
+                response = sendCallAndWaitResponse(callText)
+
+                if response[0] == "T: LGO_OK":
+                    alertBuffer.clear()
+                    commandBuffer.clear()
+                    itemBuffer.clear()
+                    txCurrState = WfC0fA
+                    rxCurrState = Wf0fB
+                    userName = None
+                    print(f"[{userName}]: Logout realizado com sucesso.")
+                    logedIn = False
+                else:
+                    print("Falha no logout:", response)
 
             else:
-                print("Resposta inesperada do servidor:", response)
+                print("Comando inválido.")
 
-
-        elif call[0] == "T: LST":
-            response = sendCallAndWaitResponse(callText)
-
-            if response[0] == "T: LST_RT":
-                print(response[1][0])
-            else:
-                print("Resposta inesperada do servidor:", response)
-
-
-        elif call[0] == "T: STS":
-            response = sendCallAndWaitResponse(callText)
-
-            if response[0] == "T: STS_RT":
-                bidUser, itemName, price = response[1]
-                print(f"Item: {itemName} | Maior lance: R$ {price:.2f} | Usuário: {bidUser}")
-            else:
-                print("Resposta inesperada do servidor:", response)
-
-
-        elif call[0] == "T: LGO":
-            response = sendCallAndWaitResponse(callText)
-
-            if response[0] == "T: LGO_OK":
-                print(f"[{userName}]: Logout realizado com sucesso.")
-                logedIn = False
-            else:
-                print("Falha no logout:", response)
-
-        else:
-            print("Comando inválido.")
-        
+    print(f"[{userName}]: Você saiu do sistema.")
