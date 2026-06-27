@@ -22,7 +22,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     # Obs2.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs3.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     
-    prob = 0.85                                # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 1                                # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -65,9 +65,11 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
 
                     seqNum = ack[:1].decode(errors='ignore')
 
+                    # Reenvia um ACK caso tenha recebido um pacote de dados perdido em vez de um ACK
                     if endAddress == endAddressDst and seqNum in ["0", "1"]:
                         socket.sendto(f"T: ACK; NUM: {seqNum};".encode(), endAddress)
-
+                    
+                    # Guarda o pacote no buffer de pendentes de forma segura com Lock
                     with pendingBufferLock:
                         pendingBuffer.append((ack, endAddress))
 
@@ -137,7 +139,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
 
 # Recebimento de pacotes do servidor
 def receive(socket, bufferSize, rxCurrState, headerSize = 1):
-    prob = 0.85                     # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
+    prob = 1                     # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # Estados possíveis do receptor RDT 3.0
     message = None                  # Conteúdo do pacote recebido, caso ele seja válido
     endAddress = None               # Endereço do remetente dopacote recebido, caso ele seja válido
@@ -257,19 +259,21 @@ def activeUserInputListener():
 
 # =================================== Funções auxiliares ===================================
 
-
+# Função que converte as strings digitadas no terminal pelo usuário para strings padronizadas
 def commandToCall(command, alert_port):
     parts = command.split()
 
     if len(parts) == 0:
         return None
 
+    # Formata a mensagem de login
     if parts[0].lower() == "login":
         if len(parts) < 2:
             return None
         username = " ".join(parts[1:])
         return f"T: LGN; UN: {username}; AP: {alert_port}; SQ: 1; ASQ: 0"
 
+    # Formata a mensagem de lance
     elif parts[0].lower() == "bid":
         if len(parts) != 3:
             return None
@@ -277,17 +281,20 @@ def commandToCall(command, alert_port):
         val = parts[2]
         return f"T: BID; IT: {id_item}; PR: {val}"
 
+    # Formata a mensagem de listagem
     elif parts[0].lower() == "list":
         if len(parts) != 1:
             return None
         return "T: LST"
 
+    # Formata a mensagem de verificação de status
     elif parts[0].lower() == "status":
         if len(parts) == 2:
             id_item = parts[1]
             return f"T: STS; IT: {id_item}"
         return None
 
+    # Formata a mensagem de logout
     elif parts[0].lower() == "logout":
         if len(parts) != 1:
             return None
@@ -295,6 +302,7 @@ def commandToCall(command, alert_port):
 
     return None
 
+# Função que recebe uma string e extrai os parâmetros.
 def splitCall(call):
     command = call.split(";")[0].strip()
     args = call.split(";")[1:]
@@ -491,7 +499,7 @@ def splitCall(call):
         case _:
             return "", []
 
-
+# Envia uma string em protocolo garantindo a entrega (rdtsend)
 def sendCallAndWaitResponse(call):
     global txCurrState
     global rxCurrState
@@ -499,6 +507,7 @@ def sendCallAndWaitResponse(call):
     ready = False
     lastPckg = b""
 
+    # Laço de envio confiável RDT
     while not ready:
         txCurrState, lastPckg, ready = rdtsend(
             call.encode(),
@@ -512,6 +521,7 @@ def sendCallAndWaitResponse(call):
     valid = False
     messageRx = None
 
+    # Laço de recepção confiável RDT
     while not valid:
         valid, messageRx, endAddress, rxCurrState = receive(
             clientSocket,
@@ -521,13 +531,14 @@ def sendCallAndWaitResponse(call):
         )
     return splitCall(messageRx.decode())
 
-
+# Função para apenas aguardar uma mensagem do servidor
 def waitReturnResponse():
     global rxCurrState
 
     valid = False
     messageRx = None
 
+    # Laço de recepção bloqueante
     while not valid:
         valid, messageRx, endAddress, rxCurrState = receive(
             clientSocket,
@@ -540,7 +551,7 @@ def waitReturnResponse():
 
 # ================================== Configuração Inicial ==================================
 
-
+# Criação dos Sockets UDP para comunicação geral e de alertas
 clientSocket = socket(AF_INET, SOCK_DGRAM)
 alertSocket = socket(AF_INET, SOCK_DGRAM)
 serverAddress = (gethostbyname("localhost"), 12000)
@@ -552,6 +563,7 @@ rxCurrState = Wf0fB
 userName = None
 logedIn = False
 
+# Amarração dos Sockets em portas efêmeras aleatórias cedidas pelo S.O
 try:
     clientSocket.bind(('', 0))
     alertSocket.bind(('', 0))
@@ -562,6 +574,7 @@ except:
     print("Erro ao criar o socket. Encerrando o cliente.")
     exit(1)
 
+# Início das threads para manter recebimento em tempo real e não travar o cliente
 alertListenerThread = threading.Thread(target=alertListener, args=(alertSocket, bufferSize, headerSize))
 alertListenerThread.start()
 activeUserInputListenerThread = threading.Thread(target=activeUserInputListener, args=())
@@ -569,12 +582,16 @@ activeUserInputListenerThread.start()
 
 print("Bem-vindo ao AuctionCin!")
 
+# Loop principal de execução do cliente
 while True:
     print("Digite o comando 'login <nome_do_usuario>' para se conectar ao servidor e participar dos leilões.")
+    
+    # Garante que as ações só ocorram logadas
     while not logedIn:
         while not userName:
             command = None
             userName = None
+            # Verifica se o usuário digitou algum comando
             if len(commandBuffer) > 0:
                 with commandLock:
                     command = commandBuffer.pop(0) if commandBuffer else None
@@ -584,38 +601,50 @@ while True:
                 else:
                     print("Comando inválido. Por favor, use o formato 'login <nome_do_usuario>'.")
 
+        # Procedimento de envio do Login
         messageTx = f"T: LGN; UN: {userName}; AP: {alertAddress}; SQ: 0; ASQ: 0"
         messageRx = None
         ready = False
         lastPckg = b""
+
+        # Envia usando RDT
         while not ready:
             txCurrState, lastPckg, ready = rdtsend(messageTx.encode(), clientSocket, serverAddress, bufferSize, txCurrState, lastPckg)
         valid = False
+
+        # Recebe resposta usando RDT
         while not valid:
             valid, messageRx, endAddress, rxCurrState = receive(clientSocket, bufferSize, rxCurrState, headerSize)
         messageRx = (messageRx.decode()).strip().split(";")
+        
+        # Tratamento da resposta de Login
         if messageRx[0] == "T: LGN_FAIL":
             if messageRx[1].strip() == "RSN: NAME_TAKEN":
                 print(f'[{userName}]: Login falhou. O nome de usuário "{userName}" já está em uso. Por favor, escolha outro nome de usuário.')
             else:
                 print(f'[{userName}]: Login falhou. Motivo desconhecido.')
             userName = None
+            # Reseta estado do RDT caso falhe
             txCurrState = WfC0fA
             rxCurrState = Wf0fB
         elif messageRx[0] == "T: LGN_OK":
             print(f'[{userName}]: Você está online!')
             logedIn = True
 
+    # Criação de pasta individual no OS baseada no username para guardar os arquivos que ele arrematar
     os.makedirs(f"cliente_{userName}", exist_ok=True)
 
+    # Loop de Sessão Ativa
     while logedIn:
 
+        # ======= PROCESSAMENTO DE ITENS VENCIDOS =======
         item = None
+        # Desempilha itens que foram enviados para essa thread
         if len(itemBuffer) > 0:
             with itemLock:
                 item = itemBuffer.pop(0) if itemBuffer else None
 
-        # Se tem item a salvar
+        # Se tem item a salvar, cria e escreve o .txt no diretório do usuário
         if item:
             itemName, content = item[1]
 
@@ -629,7 +658,8 @@ while True:
             print(f"[{userName}] Item {itemName} recebido e salvo em: {caminho}")
         item = None
 
-        # Se tem alerta para soltar
+        # ======= PROCESSAMENTO DE ALERTAS DE LEILÃO =======
+        # Se tem alerta para soltar no console para o usuário ler
         alert = None
         if len(alertBuffer) > 0:
             with alertLock:
@@ -648,12 +678,14 @@ while True:
 
         alert = None
 
-        # Se tem comando para processar
+        # ======= PROCESSAMENTO DE COMANDOS DO USUÁRIO =======
+        # Se tem comando digitado que foi desempilhado do buffer da thread de input
         command = None
         if len(commandBuffer) > 0:
             with commandLock:
                 command = commandBuffer.pop(0) if commandBuffer else None
         if command:
+            # Formata a string do usuário pro formato do protocolo
             callText = commandToCall(command, alertPort)
 
             if callText is None:
@@ -662,18 +694,20 @@ while True:
 
             call = splitCall(callText)
 
-
+            # Evita novo login caso já logado
             if call[0] == "T: LGN":
                 print("Você já está logado.")
 
-
+            # Ação: LANCE
             elif call[0] == "T: BID":
                 response = sendCallAndWaitResponse(callText)
 
+                # Confirma sucesso e atualiza display
                 if response[0] == "T: BID_OK":
                     itemName, price = response[1]
                     print(f"Lance registrado: item {itemName}, valor R$ {price:.2f}")
 
+                # Informa qual foi o erro do lance ao usuário
                 elif response[0] == "T: BID_FAIL":
                     reason = response[1][0]
                     if reason == "ITEM_NOT_FOUND":
@@ -686,11 +720,13 @@ while True:
                     print("Resposta inesperada do servidor:", response)
 
 
+            # Ação: LISTAR ITENS
             elif call[0] == "T: LST":
 
                 response = sendCallAndWaitResponse(callText)
                 itens = []
 
+                # Recebe continuamente pacotes até o servidor dizer LST_END
                 while response[0] != 'T: LST_END':
                     nome = response[1][0]
                     id = response[1][1]
@@ -705,6 +741,7 @@ while True:
                     print(item)
 
 
+            # Ação: STATUS INDIVIDUAL DO ITEM
             elif call[0] == "T: STS":
                 response = sendCallAndWaitResponse(callText)
 
@@ -718,22 +755,22 @@ while True:
                     print("Resposta inesperada do servidor:", response)
 
 
+            # Ação: DESLOGAR
             elif call[0] == "T: LGO":
                 response = sendCallAndWaitResponse(callText)
 
                 if response[0] == "T: LGO_OK":
+                    # Limpa buffers de alertas residuais e reseta as máquinas de estado RDT pro próximo login
                     alertBuffer.clear()
                     commandBuffer.clear()
                     itemBuffer.clear()
                     txCurrState = WfC0fA
                     rxCurrState = Wf0fB
+                    print(f"[{userName}]: Logout realizado com sucesso. Você saiu do sistema.")
                     userName = None
-                    print(f"[{userName}]: Logout realizado com sucesso.")
                     logedIn = False
                 else:
                     print("Falha no logout:", response)
 
             else:
                 print("Comando inválido.")
-
-    print(f"[{userName}]: Você saiu do sistema.")

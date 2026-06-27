@@ -34,7 +34,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
     # Obs2.: message é o conteúdo do pacote que queremos enviar do tamanho de messageSize (bufferSize - headerSize) e deve ser do tipo bytes
     # Obs3.: txCurrState e lastPckg não devem ser sobrescritos fora da função rdtsend a não ser pelo retorno da própria função rdtsend
     
-    prob = 1                                   # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
+    prob = 1                                # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável
     timeoutSeconds = 1                         # Timeout de 1 segundo para o cliente esperar por um ACK do servidor
     WfC0fA, WfA0, WfC1fA, WfA1 = 1, 2, 3, 4    # Estados possíveis do transmissor RDT 3.0
     pckg = lastPckg                            # Último pacote enviado, para que possamos reenviá-lo em caso de timeout
@@ -124,7 +124,7 @@ def rdtsend(message, socket, endAddressDst, bufferSize, txCurrState, lastPckg):
 # Recebimento de pacotes dos clientes
 userListState = {}
 def receive(socket, bufferSize, headerSize = 1):
-    prob = 1                        # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
+    prob = 1                     # Probabilidade de pacote ser entregue com sucesso, para simular um canal não confiável [0 a 1]
     Wf0fB, Wf1fB = 5, 6             # Estados possíveis do receptor RDT 3.0
     message = None                  # Conteúdo do pacote recebido, caso ele seja válido
     endAddress = None               # Endereço do remetente do pacote recebido, caso ele seja válido
@@ -225,7 +225,6 @@ def alertSend(socket, headerSize, itensTimeList, itemsList, userList, bidBuffer,
                 item_price = itemsList[item_name].price
                 winner_username = itemsList[item_name].bidder_username
                 item_filepath = itemsList[item_name].filepath
-                del itemsList[item_name]
 
                 # Notifica os usiuários sobre o fim do leilão deste item
                 for user in userList.keys():
@@ -266,7 +265,7 @@ def alertSend(socket, headerSize, itensTimeList, itemsList, userList, bidBuffer,
 
                         userList[endAddressDst] = [userList[user][0], userList[user][1], userList[user][2], 1 if alertSeqNum == 0 else 0]
 
-                        # NOVO: apaga o arquivo local somente depois que o conteúdo foi entregue ao vencedor
+                        # Apaga o arquivo local somente depois que o conteúdo foi entregue ao vencedor
                         if item_filepath and os.path.exists(item_filepath):
                             os.remove(item_filepath)
                             print(f"Arquivo local removido após arremate: {item_filepath}")
@@ -274,13 +273,16 @@ def alertSend(socket, headerSize, itensTimeList, itemsList, userList, bidBuffer,
                 if winner_username is None and item_filepath and os.path.exists(item_filepath):
                     os.remove(item_filepath)
                     print(f"Arquivo local removido (leilão fechado sem lances): {item_filepath}")
+
+                del itemsList[item_name]
+    
         # Paralisa a thread por exatos 1 segundo e volta ao começo
         time.sleep(1)
             
 def generateItems():
     caminho = Path(__file__).parent
     extensoes = [".txt"]
-    delay = 5  # Delay de 10 segundos entre a adição de cada item
+    delay = 10  # Delay de 10 segundos entre a adição de cada item
     counter = 1
     while True:
         arquivos_detectados = []
@@ -589,6 +591,7 @@ while True:
                 txCurrState = WfC0fA if userList[endAddress][2] == 1 else WfC1fA
                 # Exclui todos os dados dele
                 del userList[endAddress]
+                del userListState[endAddress]
                 response = f"T: LGO_OK"
                 ready = False
                 # Confirma via RDT que a saída foi processada
